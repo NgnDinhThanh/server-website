@@ -36,3 +36,10 @@ export function markPaymentPaid(payment, update) {
         updatedAt: new Date().toISOString(),
     });
 }
+export function updatePaymentRecord(payment, update) {
+    return savePayment({
+        ...payment,
+        ...update,
+        updatedAt: new Date().toISOString(),
+    });
+}

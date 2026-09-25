@@ -84,3 +84,27 @@ export function markPaymentPaid(
 		updatedAt: new Date().toISOString(),
 	})
 }
+
+export function updatePaymentRecord(
+	payment: PaymentRecord,
+	update: Partial<
+		Pick<
+			PaymentRecord,
+			| 'status'
+			| 'providerOrderId'
+			| 'providerCaptureId'
+			| 'paidAt'
+			| 'amountPaid'
+			| 'amountRemaining'
+			| 'rawProviderData'
+			| 'rawProviderStatus'
+			| 'webhook'
+		>
+	>
+) {
+	return savePayment({
+		...payment,
+		...update,
+		updatedAt: new Date().toISOString(),
+	})
+}

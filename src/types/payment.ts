@@ -16,6 +16,7 @@ export type PaymentRecordStatus =
 	| 'PAID'
 	| 'FAILED'
 	| 'REFUNDED'
+	| string
 
 export type BankInfo = {
 	name?: string

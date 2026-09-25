@@ -16,18 +16,6 @@ export function listOrders(): Order[] {
 	return Array.from(orders.values())
 }
 
-export function findOrderByProviderOrderId(
-	providerOrderId: string
-): Order | undefined {
-	return listOrders().find(order => order.providerOrderId === providerOrderId)
-}
-
-export function findOrderByProviderCaptureId(
-	providerCaptureId: string
-): Order | undefined {
-	return listOrders().find(order => order.providerCaptureId === providerCaptureId)
-}
-
 export function getPaymentCreationLock(key: string): Promise<Order> | undefined {
 	return paymentCreationLocks.get(key)
 }

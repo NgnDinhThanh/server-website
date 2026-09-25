@@ -1,11 +1,11 @@
 import { bankNamesByBin, config, plans } from '../config.js';
 import { getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCreationLock, } from '../repositories/orderRepository.js';
-import { getPaymentByOrderCode } from '../repositories/paymentRepository.js';
+import { getPayment, getPaymentByOrderCode } from '../repositories/paymentRepository.js';
 import { createPaymentRequest, getPaymentRequest } from './payosService.js';
 import { normalizeInvoice } from './invoiceService.js';
 import { applyPaidOrderToSubscription } from './subscriptionService.js';
 import { resolveCheckoutAccount } from './accountService.js';
-import { createPaymentRecord, markPaymentPaid, } from './paymentRecordService.js';
+import { createPaymentRecord, markPaymentPaid, updatePaymentRecord, } from './paymentRecordService.js';
 import { createHttpError } from '../utils/httpError.js';
 function normalizePlanId(value) {
     const raw = String(value || '').trim().toLowerCase();
@@ -60,7 +60,9 @@ function findReusablePendingOrder({ checkoutSessionId, planId, months, amount, }
     if (!checkoutSessionId)
         return null;
     for (const order of listOrders()) {
-        if (order.checkoutSessionId === checkoutSessionId &&
+        const payment = getPayment(order.paymentId);
+        if (payment?.provider === 'payos' &&
+            order.checkoutSessionId === checkoutSessionId &&
             order.planId === planId &&
             order.months === months &&
             order.amount === amount &&
@@ -193,7 +195,6 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
     return saveOrder({
         accountId,
         paymentId: payment.paymentId,
-        provider: 'payos',
         orderCode,
         planId,
         planName: plan.name,
@@ -207,20 +208,10 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
         description,
         status: paymentLink.status || 'PENDING',
         activationStatus: 'NOT_STARTED',
-        paymentLinkId: paymentLink.paymentLinkId,
-        checkoutUrl: paymentLink.checkoutUrl,
-        qrCode: paymentLink.qrCode,
-        bank: {
-            name: resolveBankName(paymentLink),
-            bin: paymentLink.bin,
-            accountNumber: paymentLink.accountNumber,
-            accountName: paymentLink.accountName,
-        },
         createdAt: now,
         updatedAt: now,
         expiresAt,
         reused: false,
-        rawPaymentLink: paymentLink,
     });
 }
 export async function syncOrderWithPayos(order) {
@@ -230,14 +221,18 @@ export async function syncOrderWithPayos(order) {
     const status = paymentLink.status || order.status;
     const paidTransaction = paymentLink.transactions?.find((transaction) => transaction.amount > 0);
     order.status = status;
-    order.amountPaid = paymentLink.amountPaid;
-    order.amountRemaining = paymentLink.amountRemaining;
     const payment = getPaymentByOrderCode(order.orderCode);
     if (status === 'PAID' && payment) {
         markPaymentPaid(payment, {
             paidAt: paidTransaction?.transactionDateTime || new Date().toISOString(),
             amountPaid: paymentLink.amountPaid,
             amountRemaining: paymentLink.amountRemaining,
+            rawProviderStatus: paymentLink,
+        });
+    }
+    else if (payment) {
+        updatePaymentRecord(payment, {
+            status,
             rawProviderStatus: paymentLink,
         });
     }
@@ -250,7 +245,6 @@ export async function syncOrderWithPayos(order) {
                 new Date().toISOString()
             : order.paidAt;
     order.updatedAt = new Date().toISOString();
-    order.rawPaymentStatus = paymentLink;
     const savedOrder = saveOrder(order);
     return status === 'PAID' ? applyPaidOrderToSubscription(savedOrder) : savedOrder;
 }
@@ -268,15 +262,19 @@ export function applyWebhookPaymentUpdate(data) {
     order.status = data.code === '00' ? 'PAID' : data.desc || 'UNKNOWN';
     order.activationStatus =
         order.status === 'PAID' ? 'ACTIVATING' : 'NOT_STARTED';
-    order.amountPaid = data.amount;
     order.paidAt = data.transactionDateTime || new Date().toISOString();
     order.updatedAt = new Date().toISOString();
-    order.webhook = data;
     const payment = getPaymentByOrderCode(order.orderCode);
     if (order.status === 'PAID' && payment) {
         markPaymentPaid(payment, {
             paidAt: order.paidAt,
             amountPaid: data.amount,
+            webhook: data,
+        });
+    }
+    else if (payment) {
+        updatePaymentRecord(payment, {
+            status: order.status,
             webhook: data,
         });
     }

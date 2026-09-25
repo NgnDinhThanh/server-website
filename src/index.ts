@@ -25,7 +25,13 @@ const app = express()
 
 app.use(
 	cors({
-		origin: config.frontendUrl,
+		origin: (origin, callback) => {
+			if (!origin || config.frontendOrigins.includes(origin)) {
+				callback(null, true)
+				return
+			}
+			callback(new Error(`CORS origin not allowed: ${origin}`))
+		},
 		credentials: true,
 	})
 )

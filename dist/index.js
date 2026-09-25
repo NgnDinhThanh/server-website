@@ -9,7 +9,13 @@ import { confirmPayosWebhook, handleWebhook, } from './controllers/payosControll
 import { capturePaypalPayment, createPaypalPayment, getPaypalConfig, getPaypalPaymentStatus, handlePaypalWebhook, } from './controllers/paypalController.js';
 const app = express();
 app.use(cors({
-    origin: config.frontendUrl,
+    origin: (origin, callback) => {
+        if (!origin || config.frontendOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
     credentials: true,
 }));
 app.use(express.json({

@@ -9,9 +9,22 @@ function readNumberEnv(key: string, fallback: number) {
 	return Number.isFinite(value) ? value : fallback
 }
 
+function readListEnv(key: string) {
+	return readEnv(key)
+		.split(',')
+		.map(value => value.trim())
+		.filter(Boolean)
+}
+
+const frontendUrl = readEnv('FRONTEND_URL', 'http://localhost:5173')
+const frontendLocalUrl = readEnv('FRONTEND_LOCAL_URL', 'http://localhost:5173')
+
 export const config = {
 	port: readNumberEnv('PORT', 4000),
-	frontendUrl: readEnv('FRONTEND_URL', 'http://localhost:5173'),
+	frontendUrl,
+	frontendOrigins: Array.from(
+		new Set([frontendUrl, frontendLocalUrl, ...readListEnv('FRONTEND_URLS')])
+	),
 	publicBaseUrl:
 		readEnv('PUBLIC_BASE_URL') ||
 		`http://localhost:${readNumberEnv('PORT', 4000)}`,

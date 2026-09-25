@@ -1,11 +1,11 @@
 import { config, plans } from '../config.js';
-import { findOrderByProviderCaptureId, findOrderByProviderOrderId, getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCreationLock, } from '../repositories/orderRepository.js';
-import { findPaymentByProviderCaptureId, findPaymentByProviderOrderId, getPaymentByOrderCode, savePayment, } from '../repositories/paymentRepository.js';
+import { getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCreationLock, } from '../repositories/orderRepository.js';
+import { findPaymentByProviderCaptureId, findPaymentByProviderOrderId, getPayment, getPaymentByOrderCode, } from '../repositories/paymentRepository.js';
 import { normalizeInvoice } from './invoiceService.js';
 import { capturePaypalOrder, createPaypalOrder, getPaypalOrder, verifyPaypalWebhook, } from './paypalService.js';
 import { applyPaidOrderToSubscription } from './subscriptionService.js';
 import { resolveCheckoutAccount } from './accountService.js';
-import { createPaymentRecord, markPaymentPaid } from './paymentRecordService.js';
+import { createPaymentRecord, markPaymentPaid, updatePaymentRecord, } from './paymentRecordService.js';
 import { createHttpError } from '../utils/httpError.js';
 function normalizePlanId(value) {
     const raw = String(value || '').trim().toLowerCase();
@@ -51,7 +51,8 @@ function createUserKey(user) {
     return user?.id || user?.email || '';
 }
 function isFreshPaypalOrder(order, now = Date.now()) {
-    if (order.provider !== 'paypal')
+    const payment = getPayment(order.paymentId);
+    if (payment?.provider !== 'paypal')
         return false;
     if (!['CREATED', 'APPROVED', 'PAYER_ACTION_REQUIRED'].includes(order.status)) {
         return false;
@@ -65,13 +66,16 @@ function findReusablePaypalOrder({ checkoutSessionId, planId, months, amount, us
     if (!checkoutSessionId)
         return null;
     const userKey = createUserKey(user);
-    return (listOrders().find(order => order.provider === 'paypal' &&
-        order.checkoutSessionId === checkoutSessionId &&
-        order.planId === planId &&
-        order.months === months &&
-        order.amount === amount &&
-        createUserKey(order.user) === userKey &&
-        isFreshPaypalOrder(order)) || null);
+    return (listOrders().find(order => {
+        const payment = getPayment(order.paymentId);
+        return (payment?.provider === 'paypal' &&
+            order.checkoutSessionId === checkoutSessionId &&
+            order.planId === planId &&
+            order.months === months &&
+            order.amount === amount &&
+            createUserKey(order.user) === userKey &&
+            isFreshPaypalOrder(order));
+    }) || null);
 }
 function createPaymentLockKey({ checkoutSessionId, planId, months, amount, user, }) {
     if (!checkoutSessionId)
@@ -106,12 +110,8 @@ function assertCapturedAmount(order, capture) {
 function activatePaidPaypalOrder(order, capture, captureId) {
     order.status = 'PAID';
     order.activationStatus = 'ACTIVATING';
-    order.providerCaptureId = captureId;
-    order.amountPaid = order.amount;
-    order.amountRemaining = 0;
     order.paidAt = new Date().toISOString();
     order.updatedAt = new Date().toISOString();
-    order.rawPaypalCapture = capture;
     const payment = getPaymentByOrderCode(order.orderCode);
     if (payment) {
         markPaymentPaid(payment, {
@@ -205,7 +205,6 @@ async function createNewPaypalOrder({ plan, planId, months, amount, user, accoun
     return saveOrder({
         accountId,
         paymentId: payment.paymentId,
-        provider: 'paypal',
         orderCode,
         planId,
         planName: plan.name,
@@ -219,21 +218,19 @@ async function createNewPaypalOrder({ plan, planId, months, amount, user, accoun
         description,
         status: paypalOrder.status || 'CREATED',
         activationStatus: 'NOT_STARTED',
-        providerOrderId: paypalOrder.id,
-        bank: {},
         createdAt: now,
         updatedAt: now,
         expiresAt,
         reused: false,
-        rawPaypalOrder: paypalOrder,
     });
 }
 export async function capturePaypalPayment(paypalOrderId) {
-    const order = findOrderByProviderOrderId(paypalOrderId);
-    if (!order || order.provider !== 'paypal') {
+    const payment = findPaymentByProviderOrderId(paypalOrderId);
+    const order = payment ? getOrder(payment.orderCode) : undefined;
+    if (!payment || payment.provider !== 'paypal' || !order) {
         throw createHttpError('PayPal order not found', 404);
     }
-    if (order.status === 'PAID' && order.providerCaptureId) {
+    if (order.status === 'PAID' && payment.providerCaptureId) {
         order.reused = true;
         order.updatedAt = new Date().toISOString();
         return saveOrder(order);
@@ -244,13 +241,19 @@ export async function capturePaypalPayment(paypalOrderId) {
 }
 export async function getPaypalSyncedOrder(orderCode) {
     const order = getOrder(orderCode);
-    if (!order || order.provider !== 'paypal')
-        return order || null;
-    if (order.status === 'PAID' || !order.providerOrderId)
+    if (!order)
+        return null;
+    const payment = getPayment(order.paymentId);
+    if (payment?.provider !== 'paypal')
         return order;
-    const paypalOrder = await getPaypalOrder(order.providerOrderId);
+    if (order.status === 'PAID' || !payment.providerOrderId)
+        return order;
+    const paypalOrder = await getPaypalOrder(payment.providerOrderId);
     order.status = paypalOrder.status || order.status;
-    order.rawPaypalOrder = paypalOrder;
+    updatePaymentRecord(payment, {
+        status: order.status,
+        rawProviderStatus: paypalOrder,
+    });
     order.updatedAt = new Date().toISOString();
     return saveOrder(order);
 }
@@ -266,22 +269,15 @@ export async function applyPaypalWebhookUpdate({ req, event, }) {
     const resource = event.resource || {};
     const captureId = String(resource.id || '');
     const paypalOrderId = String(resource.supplementary_data?.related_ids?.order_id || '');
-    const order = (paypalOrderId && findOrderByProviderOrderId(paypalOrderId)) ||
-        (captureId && findOrderByProviderCaptureId(captureId)) ||
-        null;
     const payment = (paypalOrderId && findPaymentByProviderOrderId(paypalOrderId)) ||
         (captureId && findPaymentByProviderCaptureId(captureId)) ||
         null;
-    if (!order || order.provider !== 'paypal')
+    const order = payment ? getOrder(payment.orderCode) || null : null;
+    if (!order || !payment || payment.provider !== 'paypal')
         return null;
-    order.paypalWebhook = event;
-    if (payment) {
-        payment.webhook = event;
-        payment.updatedAt = new Date().toISOString();
-        savePayment(payment);
-    }
+    updatePaymentRecord(payment, { webhook: event });
     if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
-        if (order.providerCaptureId === captureId && order.status === 'PAID') {
+        if (payment.providerCaptureId === captureId && order.status === 'PAID') {
             return saveOrder(order);
         }
         const capture = {
@@ -306,11 +302,19 @@ export async function applyPaypalWebhookUpdate({ req, event, }) {
                 ? order.activationStatus
                 : 'NOT_STARTED';
         order.updatedAt = new Date().toISOString();
+        updatePaymentRecord(payment, {
+            status: eventType,
+            webhook: event,
+        });
         return saveOrder(order);
     }
     if (eventType === 'CHECKOUT.ORDER.APPROVED') {
         order.status = 'APPROVED';
         order.updatedAt = new Date().toISOString();
+        updatePaymentRecord(payment, {
+            status: 'APPROVED',
+            webhook: event,
+        });
         return saveOrder(order);
     }
     return saveOrder(order);

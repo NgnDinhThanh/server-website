@@ -7,6 +7,9 @@ export function publicOrder(order: Order) {
 	const invoice = order.invoice
 	const account = getAccount(order.accountId)
 	const payment = getPayment(order.paymentId)
+	if (!payment) {
+		throw new Error(`Payment record not found for order ${order.orderCode}`)
+	}
 	return {
 		orderCode: order.orderCode,
 		accountId: order.accountId,
@@ -15,10 +18,9 @@ export function publicOrder(order: Order) {
 				accountId: account.accountId,
 				email: account.email,
 				name: account.name,
-			}
+		}
 			: null,
 		buyerSnapshot: order.buyerSnapshot,
-		provider: order.provider,
 		planId: order.planId,
 		planName: order.planName,
 		months: order.months,
@@ -26,42 +28,31 @@ export function publicOrder(order: Order) {
 		currency: order.currency,
 		description: order.description,
 		status: order.status,
-		paymentStatus: order.status,
 		activationStatus: order.activationStatus,
-		providerOrderId: order.providerOrderId,
-		providerCaptureId: order.providerCaptureId,
-		paymentId: order.paymentId,
-		payment: payment
-			? {
-				paymentId: payment.paymentId,
-				orderCode: payment.orderCode,
-				provider: payment.provider,
-				providerOrderId: payment.providerOrderId,
-				providerCaptureId: payment.providerCaptureId,
-				amount: payment.amount,
-				currency: payment.currency,
-				status: payment.status,
-				checkoutUrl: payment.checkoutUrl,
-				qrCode: payment.qrCode,
-				bank: payment.bank,
-				paidAt: payment.paidAt,
-				amountPaid: payment.amountPaid,
-				amountRemaining: payment.amountRemaining,
-				createdAt: payment.createdAt,
-				updatedAt: payment.updatedAt,
-				expiresAt: payment.expiresAt,
-			}
-			: null,
+		payment: {
+			paymentId: payment.paymentId,
+			orderCode: payment.orderCode,
+			provider: payment.provider,
+			providerOrderId: payment.providerOrderId,
+			providerCaptureId: payment.providerCaptureId,
+			amount: payment.amount,
+			currency: payment.currency,
+			status: payment.status,
+			checkoutUrl: payment.checkoutUrl,
+			qrCode: payment.qrCode,
+			bank: payment.bank,
+			paidAt: payment.paidAt,
+			amountPaid: payment.amountPaid,
+			amountRemaining: payment.amountRemaining,
+			createdAt: payment.createdAt,
+			updatedAt: payment.updatedAt,
+			expiresAt: payment.expiresAt,
+		},
 		user: order.user,
-		paymentLinkId: order.paymentLinkId,
-		checkoutUrl: order.checkoutUrl,
-		qrCode: order.qrCode,
-		bank: order.bank,
 		createdAt: order.createdAt,
 		updatedAt: order.updatedAt,
 		expiresAt: order.expiresAt,
 		paidAt: order.paidAt,
-		amountPaid: order.amountPaid,
 		subscription: order.subscription ?? null,
 		invoiceProvider: invoice?.provider,
 		invoiceRequested: invoice?.requested,
