@@ -37,6 +37,25 @@ export const config = {
         requestTimeoutMs: readNumberEnv('PAYPAL_REQUEST_TIMEOUT_MS', 30_000),
         requestRetries: readNumberEnv('PAYPAL_REQUEST_RETRIES', 2),
     },
+    misa: {
+        apiBaseUrl: readEnv('MISA_API_BASE_URL'),
+        accessToken: readEnv('MISA_ACCESS_TOKEN'),
+        clientId: readEnv('MISA_CLIENT_ID'),
+        clientSecret: readEnv('MISA_CLIENT_SECRET'),
+        taxCode: readEnv('MISA_TAX_CODE'),
+        username: readEnv('MISA_USERNAME'),
+        password: readEnv('MISA_PASSWORD'),
+        invoiceSeries: readEnv('MISA_INVOICE_SERIES'),
+        invTemplateNo: readEnv('MISA_INV_TEMPLATE_NO'),
+        signType: readNumberEnv('MISA_SIGN_TYPE', 2),
+        paymentMethod: readEnv('MISA_PAYMENT_METHOD'),
+        vatRate: readEnv('MISA_VAT_RATE'),
+        authorityMode: readEnv('MISA_AUTHORITY_MODE', 'without_code'),
+        publishPath: readEnv('MISA_PUBLISH_PATH'),
+        statusPath: readEnv('MISA_STATUS_PATH'),
+        publishViewPath: readEnv('MISA_PUBLISH_VIEW_PATH'),
+        sendEmailPath: readEnv('MISA_SEND_EMAIL_PATH'),
+    },
 };
 export const plans = {
     'pro-designer': { name: 'Pro Designer', monthlyUsd: 1 },
@@ -89,21 +108,17 @@ export const bankNamesByBin = {
     970499: 'Agribank',
 };
 export const requiredMisaEnvKeys = [
-    'INVOICE_PROVIDER',
-    'MISA_ENV',
-    'MISA_BASE_URL',
-    'MISA_INTEGRATION_BASE_URL',
-    'MISA_APP_ID',
+    'MISA_API_BASE_URL',
+    'MISA_CLIENT_ID',
+    'MISA_CLIENT_SECRET',
     'MISA_TAX_CODE',
     'MISA_USERNAME',
     'MISA_PASSWORD',
-    'MISA_COMPANY_TAX_CODE',
     'MISA_INVOICE_SERIES',
-    'MISA_INVOICE_NAME',
+    'MISA_INV_TEMPLATE_NO',
+    'MISA_SIGN_TYPE',
     'MISA_PAYMENT_METHOD',
     'MISA_VAT_RATE',
-    'MISA_ENABLE_PREVIEW',
-    'MISA_ENABLE_REAL_ISSUE',
 ];
 export function getMissingMisaEnv() {
     return requiredMisaEnvKeys.filter(key => !process.env[key]);

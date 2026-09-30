@@ -57,7 +57,7 @@ async function fetchWithTimeout(url, init, timeoutMs) {
         clearTimeout(timeout);
     }
 }
-async function runPaypalRequestWithRetry(label, request, retries = config.paypal.requestRetries) {
+async function runPaypalRequestWithRetry(request, retries = config.paypal.requestRetries) {
     let attempt = 0;
     while (true) {
         try {
@@ -70,7 +70,6 @@ async function runPaypalRequestWithRetry(label, request, retries = config.paypal
             }
             attempt += 1;
             const delayMs = 500 * attempt;
-            console.warn(`PayPal ${label} failed; retrying ${attempt}/${retries} in ${delayMs}ms: ${describePaypalError(error)}`);
             await wait(delayMs);
         }
     }
@@ -93,7 +92,7 @@ export async function getPaypalAccessToken() {
         return accessTokenCache.token;
     }
     const credentials = Buffer.from(`${config.paypal.clientId}:${config.paypal.clientSecret}`).toString('base64');
-    const response = await runPaypalRequestWithRetry('access token request', () => fetchWithTimeout(paypalUrl('/v1/oauth2/token'), {
+    const response = await runPaypalRequestWithRetry(() => fetchWithTimeout(paypalUrl('/v1/oauth2/token'), {
         method: 'POST',
         headers: {
             Authorization: `Basic ${credentials}`,
@@ -116,7 +115,7 @@ export async function getPaypalAccessToken() {
 export async function paypalRequest(path, init = {}) {
     const token = await getPaypalAccessToken();
     const { timeoutMs, retries, ...requestInit } = init;
-    const response = await runPaypalRequestWithRetry(`${path} request`, () => fetchWithTimeout(paypalUrl(path), {
+    const response = await runPaypalRequestWithRetry(() => fetchWithTimeout(paypalUrl(path), {
         ...requestInit,
         headers: {
             Authorization: `Bearer ${token}`,
@@ -184,32 +183,11 @@ export async function verifyPaypalWebhook({ headers, event, }) {
         webhook_id: config.paypal.webhookId,
         webhook_event: event,
     };
-    const missingHeaders = [
-        'paypal-auth-algo',
-        'paypal-cert-url',
-        'paypal-transmission-id',
-        'paypal-transmission-sig',
-        'paypal-transmission-time',
-    ].filter(key => !headers[key]);
-    if (missingHeaders.length) {
-        console.warn('PayPal webhook is missing signature headers', {
-            eventType: event.event_type,
-            eventId: event.id,
-            missingHeaders,
-        });
-    }
     const verification = await paypalRequest('/v1/notifications/verify-webhook-signature', {
         method: 'POST',
         body: JSON.stringify(verificationPayload),
     });
     const verificationStatus = String(verification.verification_status || '');
-    console.info('PayPal webhook verification result', {
-        eventType: event.event_type,
-        eventId: event.id,
-        resourceId: event.resource?.id,
-        webhookId: config.paypal.webhookId,
-        verificationStatus,
-    });
     return verificationStatus === 'SUCCESS';
 }
 export function isTransientPaypalRequestError(error) {

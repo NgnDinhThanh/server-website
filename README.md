@@ -17,25 +17,34 @@ For webhook testing, expose this server with a public URL such as ngrok or Cloud
 
 ## MISA invoice configuration
 
-The invoice path uses MISA meInvoice test environment directly. There is no invoice mock mode.
+The invoice path uses the MISA meInvoice integration API. There is no invoice mock mode.
 
 Required MISA keys before invoice preview/issue work can be connected:
 
-- `INVOICE_PROVIDER=misa`
-- `MISA_ENV=test`
-- `MISA_BASE_URL`
-- `MISA_INTEGRATION_BASE_URL`
-- `MISA_APP_ID`
+- `MISA_API_BASE_URL`
+- `MISA_CLIENT_ID`
+- `MISA_CLIENT_SECRET`
 - `MISA_TAX_CODE`
 - `MISA_USERNAME`
 - `MISA_PASSWORD`
-- `MISA_COMPANY_TAX_CODE`
 - `MISA_INVOICE_SERIES`
-- `MISA_INVOICE_NAME`
+- `MISA_INV_TEMPLATE_NO`
+- `MISA_SIGN_TYPE`
 - `MISA_PAYMENT_METHOD`
 - `MISA_VAT_RATE`
-- `MISA_ENABLE_PREVIEW`
-- `MISA_ENABLE_REAL_ISSUE`
+
+`MISA_ACCESS_TOKEN` is optional. If it is empty, the server requests a token from `POST /invoice/token` by using `ClientID`, `ClientSecret`, tax code, username, and password.
+
+Default integration paths are:
+
+- preview: `POST /invoice/unpublishview`
+- publish with HSM `SignType=2`: `POST /invoice/publishing`
+- status: `POST /invoice/status?invoiceWithCode=<true|false>&invoiceCalcu=false&inputType=1`
+- published view: `POST /invoice/publishview`
+- email: `POST /invoice/sendemail`
+- download: `POST /invoice/Download`
+
+Only set `MISA_PUBLISH_PATH`, `MISA_STATUS_PATH`, `MISA_PUBLISH_VIEW_PATH`, or `MISA_SEND_EMAIL_PATH` when intentionally switching to another MISA API family.
 
 ## Endpoints
 
@@ -48,6 +57,10 @@ Required MISA keys before invoice preview/issue work can be connected:
 - `GET /api/payments/paypal/status/:orderCode`
 - `GET /api/payments/:orderCode`
 - `GET /api/invoices/:orderCode`
+- `POST /api/invoices/:orderCode/preview`
+- `POST /api/invoices/:orderCode/issue`
+- `POST /api/invoices/:orderCode/publish`
+- `GET /api/invoices/:orderCode/download`
 - `POST /api/payos/webhook`
 - `POST /api/payos/confirm-webhook`
 - `POST /api/paypal/webhook`

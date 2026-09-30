@@ -2,7 +2,7 @@ import { bankNamesByBin, config, plans } from '../config.js';
 import { getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCreationLock, } from '../repositories/orderRepository.js';
 import { getPayment, getPaymentByOrderCode } from '../repositories/paymentRepository.js';
 import { createPaymentRequest, getPaymentRequest } from './payosService.js';
-import { normalizeInvoice } from './invoiceService.js';
+import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js';
 import { applyPaidOrderToSubscription } from './subscriptionService.js';
 import { resolveCheckoutAccount } from './accountService.js';
 import { createPaymentRecord, markPaymentPaid, updatePaymentRecord, } from './paymentRecordService.js';
@@ -35,6 +35,22 @@ function createOrderCode() {
 }
 function createDescription(orderCode) {
     return `OCC${String(orderCode).slice(-6)}`;
+}
+function createOrderItems({ plan, planId, months, amount, }) {
+    return [
+        {
+            productId: 'occ-subscription',
+            planId,
+            description: `${plan.name} subscription - ${months} month${months > 1 ? 's' : ''}`,
+            quantity: 1,
+            unitPrice: amount,
+            amount,
+            currency: 'VND',
+            taxCategory: null,
+            taxRate: null,
+            taxAmount: null,
+        },
+    ];
 }
 function normalizeCheckoutSessionId(value) {
     const sessionId = String(value || '').trim();
@@ -198,6 +214,7 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
         orderCode,
         planId,
         planName: plan.name,
+        items: createOrderItems({ plan, planId, months, amount }),
         months,
         amount,
         currency: 'VND',
@@ -215,8 +232,9 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
     });
 }
 export async function syncOrderWithPayos(order) {
-    if (!isPendingStatus(order.status))
-        return order;
+    if (!isPendingStatus(order.status)) {
+        return order.status === 'PAID' ? preparePaidInvoice(order) : order;
+    }
     const paymentLink = await getPaymentRequest(order.orderCode);
     const status = paymentLink.status || order.status;
     const paidTransaction = paymentLink.transactions?.find((transaction) => transaction.amount > 0);
@@ -246,7 +264,9 @@ export async function syncOrderWithPayos(order) {
             : order.paidAt;
     order.updatedAt = new Date().toISOString();
     const savedOrder = saveOrder(order);
-    return status === 'PAID' ? applyPaidOrderToSubscription(savedOrder) : savedOrder;
+    if (status !== 'PAID')
+        return savedOrder;
+    return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder));
 }
 export async function getSyncedOrder(orderCode) {
     const order = getOrder(orderCode);
@@ -254,7 +274,7 @@ export async function getSyncedOrder(orderCode) {
         return null;
     return syncOrderWithPayos(order);
 }
-export function applyWebhookPaymentUpdate(data) {
+export async function applyWebhookPaymentUpdate(data) {
     const orderCode = String(data.orderCode);
     const order = getOrder(orderCode);
     if (!order)
@@ -279,7 +299,7 @@ export function applyWebhookPaymentUpdate(data) {
         });
     }
     const savedOrder = saveOrder(order);
-    return order.status === 'PAID'
-        ? applyPaidOrderToSubscription(savedOrder)
-        : savedOrder;
+    if (order.status !== 'PAID')
+        return savedOrder;
+    return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder));
 }

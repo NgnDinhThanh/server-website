@@ -8,7 +8,15 @@ import {
 	createDomesticPayment,
 	getPaymentStatus,
 } from './controllers/paymentController.js'
-import { getInvoiceStatus } from './controllers/invoiceController.js'
+import {
+	downloadOrderInvoice,
+	getInvoiceStatus,
+	getMisaInvoiceTemplates,
+	issueOrderInvoice,
+	publishOrderInvoice,
+	previewOrderInvoice,
+	sendOrderInvoiceEmail,
+} from './controllers/invoiceController.js'
 import {
 	confirmPayosWebhook,
 	handleWebhook,
@@ -54,14 +62,19 @@ app.post('/api/payments/paypal/:paypalOrderId/capture', capturePaypalPayment)
 app.get('/api/payments/paypal/status/:orderCode', getPaypalPaymentStatus)
 app.get('/api/payments/:orderCode', getPaymentStatus)
 
+app.get('/api/invoices/misa/templates', getMisaInvoiceTemplates)
 app.get('/api/invoices/:orderCode', getInvoiceStatus)
+app.post('/api/invoices/:orderCode/preview', previewOrderInvoice)
+app.post('/api/invoices/:orderCode/publish', publishOrderInvoice)
+app.post('/api/invoices/:orderCode/issue', issueOrderInvoice)
+app.get('/api/invoices/:orderCode/download', downloadOrderInvoice)
+app.post('/api/invoices/:orderCode/send-email', sendOrderInvoiceEmail)
 
 app.post('/api/payos/webhook', handleWebhook)
 app.post('/api/payos/confirm-webhook', confirmPayosWebhook)
 app.post('/api/paypal/webhook', handlePaypalWebhook)
 
 const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
-	console.error(error)
 	res.status(error.status || 500).json({
 		error: error.message || 'Internal server error',
 	})
@@ -69,6 +82,4 @@ const errorHandler: ErrorRequestHandler = (error, req, res, next) => {
 
 app.use(errorHandler)
 
-app.listen(config.port, () => {
-	console.log(`OCC payOS test server listening on http://localhost:${config.port}`)
-})
+app.listen(config.port)

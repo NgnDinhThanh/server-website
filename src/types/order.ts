@@ -10,6 +10,20 @@ export type OrderStatus =
 	| 'FULFILLED'
 	| 'CANCELLED'
 	| 'EXPIRED'
+	| 'REFUNDED'
+
+export type OrderItemSnapshot = {
+	productId: string
+	planId: PlanId
+	description: string
+	quantity: number
+	unitPrice: number
+	amount: number
+	currency: PaymentCurrency
+	taxCategory: string | null
+	taxRate: number | null
+	taxAmount: number | null
+}
 
 export type Order = {
 	accountId: string
@@ -17,6 +31,7 @@ export type Order = {
 	orderCode: number
 	planId: PlanId
 	planName: string
+	items: OrderItemSnapshot[]
 	months: number
 	amount: number
 	currency: PaymentCurrency

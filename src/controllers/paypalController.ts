@@ -8,7 +8,6 @@ import {
 	getPaypalSyncedOrder,
 } from '../services/paypalPaymentService.js'
 import {
-	getPaypalRequestErrorMessage,
 	isTransientPaypalRequestError,
 } from '../services/paypalService.js'
 import type { RequestWithRawBody } from '../types.js'
@@ -77,17 +76,12 @@ export async function handlePaypalWebhook(req: Request, res: Response) {
 		res.json({ ok: true })
 	} catch (error) {
 		if (isTransientPaypalRequestError(error)) {
-			const message = getPaypalRequestErrorMessage(error)
-			console.error('PayPal webhook verification temporarily failed', {
-				message,
-			})
 			return res.status(503).json({
 				ok: false,
 				error: 'PayPal webhook verification temporarily unavailable',
 			})
 		}
 
-		console.error('PayPal webhook verification failed', error)
 		res.status(400).json({ ok: false, error: 'Invalid webhook signature' })
 	}
 }

@@ -1,7 +1,20 @@
 export type { Account, BuyerSnapshot, CheckoutUser } from './types/account.js'
 export type { HttpError } from './types/http.js'
 export type { InvoiceStatus, InvoiceType, OrderInvoice } from './types/invoice.js'
-export type { Order, OrderStatus } from './types/order.js'
+export type {
+	MisaApiResponse,
+	MisaDownloadFile,
+	MisaInvoiceStatusResult,
+	MisaInvoicePayload,
+	MisaInvoiceTemplate,
+	MisaIssueResult,
+	MisaPreviewResult,
+	MisaPublishResult,
+	MisaPublishingPayload,
+	MisaSendEmailPayload,
+	MisaTokenResponse,
+} from './types/misa.js'
+export type { Order, OrderItemSnapshot, OrderStatus } from './types/order.js'
 export type {
 	BankInfo,
 	PaymentCurrency,

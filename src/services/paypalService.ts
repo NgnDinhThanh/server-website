@@ -96,7 +96,6 @@ async function fetchWithTimeout(
 }
 
 async function runPaypalRequestWithRetry<T>(
-	label: string,
 	request: () => Promise<T>,
 	retries = config.paypal.requestRetries
 ) {
@@ -113,9 +112,6 @@ async function runPaypalRequestWithRetry<T>(
 
 			attempt += 1
 			const delayMs = 500 * attempt
-			console.warn(
-				`PayPal ${label} failed; retrying ${attempt}/${retries} in ${delayMs}ms: ${describePaypalError(error)}`
-			)
 			await wait(delayMs)
 		}
 	}
@@ -147,7 +143,7 @@ export async function getPaypalAccessToken(): Promise<string> {
 	const credentials = Buffer.from(
 		`${config.paypal.clientId}:${config.paypal.clientSecret}`
 	).toString('base64')
-	const response = await runPaypalRequestWithRetry('access token request', () =>
+	const response = await runPaypalRequestWithRetry(() =>
 		fetchWithTimeout(
 			paypalUrl('/v1/oauth2/token'),
 			{
@@ -184,7 +180,6 @@ export async function paypalRequest(
 	const token = await getPaypalAccessToken()
 	const { timeoutMs, retries, ...requestInit } = init
 	const response = await runPaypalRequestWithRetry(
-		`${path} request`,
 		() =>
 			fetchWithTimeout(
 				paypalUrl(path),
@@ -283,22 +278,6 @@ export async function verifyPaypalWebhook({
 		webhook_id: config.paypal.webhookId,
 		webhook_event: event,
 	}
-	const missingHeaders = [
-		'paypal-auth-algo',
-		'paypal-cert-url',
-		'paypal-transmission-id',
-		'paypal-transmission-sig',
-		'paypal-transmission-time',
-	].filter(key => !headers[key])
-
-	if (missingHeaders.length) {
-		console.warn('PayPal webhook is missing signature headers', {
-			eventType: event.event_type,
-			eventId: event.id,
-			missingHeaders,
-		})
-	}
-
 	const verification = await paypalRequest(
 		'/v1/notifications/verify-webhook-signature',
 		{
@@ -307,13 +286,6 @@ export async function verifyPaypalWebhook({
 		}
 	)
 	const verificationStatus = String(verification.verification_status || '')
-	console.info('PayPal webhook verification result', {
-		eventType: event.event_type,
-		eventId: event.id,
-		resourceId: event.resource?.id,
-		webhookId: config.paypal.webhookId,
-		verificationStatus,
-	})
 
 	return verificationStatus === 'SUCCESS'
 }

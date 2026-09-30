@@ -1,6 +1,22 @@
 import { config } from '../config.js';
 import { getAccount } from '../repositories/accountRepository.js';
 import { getPayment } from '../repositories/paymentRepository.js';
+function toOrderStatus(status) {
+    const normalized = String(status || '').toUpperCase();
+    if (normalized === 'PAID')
+        return 'PAID';
+    if (normalized.includes('REFUNDED'))
+        return 'REFUNDED';
+    if (normalized.includes('CANCELLED') ||
+        normalized.includes('CANCELED') ||
+        normalized.includes('VOIDED') ||
+        normalized.includes('DENIED')) {
+        return 'CANCELLED';
+    }
+    if (normalized.includes('EXPIRED'))
+        return 'EXPIRED';
+    return 'PENDING_PAYMENT';
+}
 export function publicOrder(order) {
     const invoice = order.invoice;
     const account = getAccount(order.accountId);
@@ -25,6 +41,7 @@ export function publicOrder(order) {
         amount: order.amount,
         currency: order.currency,
         description: order.description,
+        orderStatus: toOrderStatus(order.status),
         status: order.status,
         activationStatus: order.activationStatus,
         payment: {
@@ -47,6 +64,7 @@ export function publicOrder(order) {
             expiresAt: payment.expiresAt,
         },
         user: order.user,
+        items: order.items ?? [],
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         expiresAt: order.expiresAt,
@@ -60,6 +78,16 @@ export function publicOrder(order) {
         invoiceNumber: invoice?.invoiceNumber ?? null,
         invoiceIssuedAt: invoice?.issuedAt ?? null,
         invoiceError: invoice?.error ?? null,
+        invoiceDeliveryEmail: invoice?.deliveryEmail ?? null,
+        invoiceEmailDeliveryRequested: invoice?.emailDeliveryRequested ?? false,
+        invoiceEmailSentAt: invoice?.emailSentAt ?? null,
+        invoiceEmailError: invoice?.emailError ?? null,
+        invoiceMisaRefId: invoice?.misa.refId ?? null,
+        invoiceMisaTransactionId: invoice?.misa.transactionId ?? null,
+        invoiceMisaInvoiceId: invoice?.misa.invoiceId ?? null,
+        invoiceMisaPublishStatus: invoice?.misa.publishStatus ?? null,
+        invoiceMisaSendTaxStatus: invoice?.misa.sendTaxStatus ?? null,
+        invoiceMisaTaxAuthorityCode: invoice?.misa.taxAuthorityCode ?? null,
         reused: Boolean(order.reused),
         isForcedTestAmount: Boolean(config.forcedTestAmount),
     };

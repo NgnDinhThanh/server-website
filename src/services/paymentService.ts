@@ -8,7 +8,7 @@ import {
 } from '../repositories/orderRepository.js'
 import { getPayment, getPaymentByOrderCode } from '../repositories/paymentRepository.js'
 import { createPaymentRequest, getPaymentRequest } from './payosService.js'
-import { normalizeInvoice } from './invoiceService.js'
+import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js'
 import { applyPaidOrderToSubscription } from './subscriptionService.js'
 import { resolveCheckoutAccount } from './accountService.js'
 import {
@@ -27,6 +27,7 @@ import type {
 	Plan,
 	PlanId,
 	BuyerSnapshot,
+	OrderItemSnapshot,
 } from '../types.js'
 
 function normalizePlanId(value: unknown): PlanId {
@@ -61,6 +62,35 @@ function createOrderCode(): number {
 
 function createDescription(orderCode: number): string {
 	return `OCC${String(orderCode).slice(-6)}`
+}
+
+function createOrderItems({
+	plan,
+	planId,
+	months,
+	amount,
+}: {
+	plan: Plan
+	planId: PlanId
+	months: number
+	amount: number
+}): OrderItemSnapshot[] {
+	return [
+		{
+			productId: 'occ-subscription',
+			planId,
+			description: `${plan.name} subscription - ${months} month${
+				months > 1 ? 's' : ''
+			}`,
+			quantity: 1,
+			unitPrice: amount,
+			amount,
+			currency: 'VND',
+			taxCategory: null,
+			taxRate: null,
+			taxAmount: null,
+		},
+	]
 }
 
 function normalizeCheckoutSessionId(value: unknown): string {
@@ -299,6 +329,7 @@ async function createNewPaymentOrder({
 		orderCode,
 		planId,
 		planName: plan.name,
+		items: createOrderItems({ plan, planId, months, amount }),
 		months,
 		amount,
 		currency: 'VND',
@@ -317,7 +348,9 @@ async function createNewPaymentOrder({
 }
 
 export async function syncOrderWithPayos(order: Order): Promise<Order> {
-	if (!isPendingStatus(order.status)) return order
+	if (!isPendingStatus(order.status)) {
+		return order.status === 'PAID' ? preparePaidInvoice(order) : order
+	}
 
 	const paymentLink = await getPaymentRequest(order.orderCode)
 	const status = paymentLink.status || order.status
@@ -350,7 +383,8 @@ export async function syncOrderWithPayos(order: Order): Promise<Order> {
 			: order.paidAt
 	order.updatedAt = new Date().toISOString()
 	const savedOrder = saveOrder(order)
-	return status === 'PAID' ? applyPaidOrderToSubscription(savedOrder) : savedOrder
+	if (status !== 'PAID') return savedOrder
+	return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder))
 }
 
 export async function getSyncedOrder(
@@ -361,7 +395,9 @@ export async function getSyncedOrder(
 	return syncOrderWithPayos(order)
 }
 
-export function applyWebhookPaymentUpdate(data: PayosWebhookData): Order | null {
+export async function applyWebhookPaymentUpdate(
+	data: PayosWebhookData
+): Promise<Order | null> {
 	const orderCode = String(data.orderCode)
 	const order = getOrder(orderCode)
 
@@ -386,7 +422,6 @@ export function applyWebhookPaymentUpdate(data: PayosWebhookData): Order | null 
 		})
 	}
 	const savedOrder = saveOrder(order)
-	return order.status === 'PAID'
-		? applyPaidOrderToSubscription(savedOrder)
-		: savedOrder
+	if (order.status !== 'PAID') return savedOrder
+	return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder))
 }

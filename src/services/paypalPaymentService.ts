@@ -12,7 +12,7 @@ import {
 	getPayment,
 	getPaymentByOrderCode,
 } from '../repositories/paymentRepository.js'
-import { normalizeInvoice } from './invoiceService.js'
+import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js'
 import {
 	capturePaypalOrder,
 	createPaypalOrder,
@@ -38,6 +38,7 @@ import type {
 	Plan,
 	PlanId,
 	RequestWithRawBody,
+	OrderItemSnapshot,
 } from '../types.js'
 
 function normalizePlanId(value: unknown): PlanId {
@@ -73,6 +74,37 @@ function createOrderCode(): number {
 
 function createDescription(orderCode: number): string {
 	return `OCC${String(orderCode).slice(-6)}`
+}
+
+function createOrderItems({
+	plan,
+	planId,
+	months,
+	amount,
+	currency,
+}: {
+	plan: Plan
+	planId: PlanId
+	months: number
+	amount: number
+	currency: 'USD'
+}): OrderItemSnapshot[] {
+	return [
+		{
+			productId: 'occ-subscription',
+			planId,
+			description: `${plan.name} subscription - ${months} month${
+				months > 1 ? 's' : ''
+			}`,
+			quantity: 1,
+			unitPrice: amount,
+			amount,
+			currency,
+			taxCategory: null,
+			taxRate: null,
+			taxAmount: null,
+		},
+	]
 }
 
 function calculatePaypalAmount(plan: Plan, months: number) {
@@ -181,7 +213,7 @@ function assertCapturedAmount(order: Order, capture: PaypalApiObject) {
 	return captured
 }
 
-function activatePaidPaypalOrder(
+async function activatePaidPaypalOrder(
 	order: Order,
 	capture: PaypalApiObject,
 	captureId: string
@@ -200,7 +232,7 @@ function activatePaidPaypalOrder(
 			rawProviderStatus: capture,
 		})
 	}
-	return applyPaidOrderToSubscription(saveOrder(order))
+	return preparePaidInvoice(applyPaidOrderToSubscription(saveOrder(order)))
 }
 
 export async function createPaypalPayment(
@@ -318,6 +350,13 @@ async function createNewPaypalOrder({
 		orderCode,
 		planId,
 		planName: plan.name,
+		items: createOrderItems({
+			plan,
+			planId,
+			months,
+			amount: amount.amount,
+			currency: 'USD',
+		}),
 		months,
 		amount: amount.amount,
 		currency: 'USD',
@@ -361,7 +400,8 @@ export async function getPaypalSyncedOrder(
 	if (!order) return null
 	const payment = getPayment(order.paymentId)
 	if (payment?.provider !== 'paypal') return order
-	if (order.status === 'PAID' || !payment.providerOrderId) return order
+	if (order.status === 'PAID') return preparePaidInvoice(order)
+	if (!payment.providerOrderId) return order
 
 	const paypalOrder = await getPaypalOrder(payment.providerOrderId)
 	order.status = paypalOrder.status || order.status

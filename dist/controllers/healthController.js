@@ -8,7 +8,7 @@ export function getHealth(req, res) {
         paypalMode: config.paypal.mode,
         hasPaypalEnv: hasPaypalEnv(),
         hasPaypalWebhookEnv: hasPaypalWebhookEnv(),
-        invoiceProvider: process.env.INVOICE_PROVIDER || null,
+        invoiceProvider: 'misa',
         hasMisaEnv: getMissingMisaEnv().length === 0,
     });
 }

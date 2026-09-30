@@ -5,11 +5,10 @@ export async function handleWebhook(req, res) {
     try {
         const webhookData = await verifyWebhook(req.body);
         const data = webhookData?.data ?? webhookData;
-        applyWebhookPaymentUpdate(data);
+        await applyWebhookPaymentUpdate(data);
         res.json({ ok: true });
     }
     catch (error) {
-        console.error('payOS webhook verification failed', error);
         res.status(400).json({ ok: false, error: 'Invalid webhook signature' });
     }
 }

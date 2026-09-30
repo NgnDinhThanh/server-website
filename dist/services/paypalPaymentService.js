@@ -1,7 +1,7 @@
 import { config, plans } from '../config.js';
 import { getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCreationLock, } from '../repositories/orderRepository.js';
 import { findPaymentByProviderCaptureId, findPaymentByProviderOrderId, getPayment, getPaymentByOrderCode, } from '../repositories/paymentRepository.js';
-import { normalizeInvoice } from './invoiceService.js';
+import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js';
 import { capturePaypalOrder, createPaypalOrder, getPaypalOrder, verifyPaypalWebhook, } from './paypalService.js';
 import { applyPaidOrderToSubscription } from './subscriptionService.js';
 import { resolveCheckoutAccount } from './accountService.js';
@@ -38,6 +38,22 @@ function createOrderCode() {
 }
 function createDescription(orderCode) {
     return `OCC${String(orderCode).slice(-6)}`;
+}
+function createOrderItems({ plan, planId, months, amount, currency, }) {
+    return [
+        {
+            productId: 'occ-subscription',
+            planId,
+            description: `${plan.name} subscription - ${months} month${months > 1 ? 's' : ''}`,
+            quantity: 1,
+            unitPrice: amount,
+            amount,
+            currency,
+            taxCategory: null,
+            taxRate: null,
+            taxAmount: null,
+        },
+    ];
 }
 function calculatePaypalAmount(plan, months) {
     const value = (plan.monthlyUsd * months).toFixed(2);
@@ -107,7 +123,7 @@ function assertCapturedAmount(order, capture) {
     }
     return captured;
 }
-function activatePaidPaypalOrder(order, capture, captureId) {
+async function activatePaidPaypalOrder(order, capture, captureId) {
     order.status = 'PAID';
     order.activationStatus = 'ACTIVATING';
     order.paidAt = new Date().toISOString();
@@ -122,7 +138,7 @@ function activatePaidPaypalOrder(order, capture, captureId) {
             rawProviderStatus: capture,
         });
     }
-    return applyPaidOrderToSubscription(saveOrder(order));
+    return preparePaidInvoice(applyPaidOrderToSubscription(saveOrder(order)));
 }
 export async function createPaypalPayment(body) {
     if (!config.paypal.enabled) {
@@ -208,6 +224,13 @@ async function createNewPaypalOrder({ plan, planId, months, amount, user, accoun
         orderCode,
         planId,
         planName: plan.name,
+        items: createOrderItems({
+            plan,
+            planId,
+            months,
+            amount: amount.amount,
+            currency: 'USD',
+        }),
         months,
         amount: amount.amount,
         currency: 'USD',
@@ -246,7 +269,9 @@ export async function getPaypalSyncedOrder(orderCode) {
     const payment = getPayment(order.paymentId);
     if (payment?.provider !== 'paypal')
         return order;
-    if (order.status === 'PAID' || !payment.providerOrderId)
+    if (order.status === 'PAID')
+        return preparePaidInvoice(order);
+    if (!payment.providerOrderId)
         return order;
     const paypalOrder = await getPaypalOrder(payment.providerOrderId);
     order.status = paypalOrder.status || order.status;
