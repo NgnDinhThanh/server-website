@@ -6,7 +6,6 @@ function assertMisaConfig() {
         config.misa.invoiceSeries ? '' : 'MISA_INVOICE_SERIES',
         config.misa.invTemplateNo ? '' : 'MISA_INV_TEMPLATE_NO',
         config.misa.paymentMethod ? '' : 'MISA_PAYMENT_METHOD',
-        config.misa.vatRate ? '' : 'MISA_VAT_RATE',
     ].filter(Boolean);
     if (missing.length) {
         throw createHttpError(`Missing MISA invoice config: ${missing.join(', ')}`, 500);
@@ -18,6 +17,37 @@ function readVatRate() {
         throw createHttpError('MISA_VAT_RATE must be a non-negative number', 500);
     }
     return vatRate;
+}
+function resolveMisaTax(order) {
+    const item = order.items[0];
+    const totalAmount = resolveInvoiceAmountVnd(order);
+    if (!item || item.taxCategory === 'NON_TAXABLE') {
+        return {
+            totalAmount,
+            amountWithoutVat: totalAmount,
+            vatAmount: 0,
+            vatRateName: 'KCT',
+        };
+    }
+    if (item.taxCategory === 'VAT_ZERO') {
+        return {
+            totalAmount,
+            amountWithoutVat: totalAmount,
+            vatAmount: 0,
+            vatRateName: '0%',
+        };
+    }
+    const vatRate = typeof item.taxRate === 'number' && Number.isFinite(item.taxRate)
+        ? item.taxRate
+        : readVatRate();
+    const amountWithoutVat = roundMoney(totalAmount / (1 + vatRate / 100));
+    const vatAmount = totalAmount - amountWithoutVat;
+    return {
+        totalAmount,
+        amountWithoutVat,
+        vatAmount,
+        vatRateName: `${vatRate}%`,
+    };
 }
 function roundMoney(value) {
     return Math.round(value);
@@ -31,18 +61,15 @@ function resolveInvoiceAmountVnd(order) {
 export function createMisaInvoicePayload(order) {
     assertMisaConfig();
     const invoice = order.invoice;
-    const vatRate = readVatRate();
-    const totalAmount = resolveInvoiceAmountVnd(order);
-    const amountWithoutVat = roundMoney(totalAmount / (1 + vatRate / 100));
-    const vatAmount = totalAmount - amountWithoutVat;
-    const isConsumerInvoice = !invoice.requested;
+    const { totalAmount, amountWithoutVat, vatAmount, vatRateName } = resolveMisaTax(order);
+    const isConsumerInvoice = invoice.buyerMode === 'consumer';
     const buyerLegalName = isConsumerInvoice
         ? CONSUMER_BUYER_NAME
-        : invoice.type === 'business'
+        : invoice.buyerMode === 'business'
             ? invoice.buyerCompanyName
             : invoice.buyerName;
-    const buyerTaxCode = !isConsumerInvoice && invoice.type === 'business' ? invoice.buyerTaxCode : '';
-    const buyerIdNumber = !isConsumerInvoice && invoice.type === 'individual'
+    const buyerTaxCode = !isConsumerInvoice && invoice.buyerMode === 'business' ? invoice.buyerTaxCode : '';
+    const buyerIdNumber = !isConsumerInvoice && invoice.buyerMode === 'individual'
         ? invoice.buyerIdNumber
         : '';
     const buyerFullName = isConsumerInvoice ? CONSUMER_BUYER_NAME : invoice.buyerName;
@@ -96,14 +123,14 @@ export function createMisaInvoicePayload(order) {
                 DiscountAmount: 0,
                 AmountWithoutVATOC: amountWithoutVat,
                 AmountWithoutVAT: amountWithoutVat,
-                VATRateName: `${vatRate}%`,
+                VATRateName: vatRateName,
                 VATAmountOC: vatAmount,
                 VATAmount: vatAmount,
             },
         ],
         TaxRateInfo: [
             {
-                VATRateName: `${vatRate}%`,
+                VATRateName: vatRateName,
                 AmountWithoutVATOC: amountWithoutVat,
                 VATAmountOC: vatAmount,
             },

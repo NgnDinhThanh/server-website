@@ -13,9 +13,16 @@ export type PaymentRecordStatus =
 	| 'PENDING'
 	| 'PROCESSING'
 	| 'APPROVED'
+	| 'PAYER_ACTION_REQUIRED'
 	| 'PAID'
+	| 'COMPLETED'
 	| 'FAILED'
 	| 'REFUNDED'
+	| 'EXPIRED'
+	| 'CANCELLED'
+	| 'CANCELED'
+	| 'VOIDED'
+	| 'DENIED'
 	| string
 
 export type BankInfo = {
@@ -24,8 +31,6 @@ export type BankInfo = {
 	accountNumber?: string
 	accountName?: string
 }
-
-export type PaymentStatus = string
 
 export type PaymentRecord = {
 	paymentId: string

@@ -1,20 +1,25 @@
 import type { SubscriptionSnapshot } from '../types.js'
+import { SubscriptionModel } from '../models/Subscription.js'
 
-const subscriptions = new Map<string, SubscriptionSnapshot>()
-
-export function getSubscription(
-	accountId: string
-): SubscriptionSnapshot | undefined {
-	return subscriptions.get(accountId)
+export async function getSubscription(
+	userId: string
+): Promise<SubscriptionSnapshot | undefined> {
+	return ((await SubscriptionModel.findOne({ userId }).lean()) || undefined) as
+		| SubscriptionSnapshot
+		| undefined
 }
 
-export function saveSubscription(
+export async function saveSubscription(
 	subscription: SubscriptionSnapshot
-): SubscriptionSnapshot {
-	subscriptions.set(subscription.accountId, subscription)
-	return subscription
+): Promise<SubscriptionSnapshot> {
+	const saved = await SubscriptionModel.findOneAndUpdate(
+		{ userId: subscription.userId },
+		subscription,
+		{ new: true, upsert: true, setDefaultsOnInsert: true }
+	).lean()
+	return (saved || subscription) as SubscriptionSnapshot
 }
 
-export function listSubscriptions(): SubscriptionSnapshot[] {
-	return Array.from(subscriptions.values())
+export async function listSubscriptions(): Promise<SubscriptionSnapshot[]> {
+	return (await SubscriptionModel.find().lean()) as SubscriptionSnapshot[]
 }

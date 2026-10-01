@@ -5,7 +5,6 @@ export type RenewalType = 'NEW' | 'RENEWAL' | 'REACTIVATION' | 'PLAN_CHANGE'
 
 export type SubscriptionSnapshot = {
 	userId: string
-	accountId: string
 	planId: PlanId
 	planName: string
 	status: SubscriptionStatus
@@ -21,7 +20,7 @@ export type SubscriptionSnapshot = {
 
 export type SubscriptionEvent = {
 	eventId: string
-	accountId: string
+	userId: string
 	orderCode: number
 	paymentId?: string
 	type: RenewalType

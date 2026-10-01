@@ -2,9 +2,9 @@ import { savePayment } from '../repositories/paymentRepository.js';
 export function createPaymentId(provider, orderCode) {
     return `${provider}:${orderCode}`;
 }
-export function createPaymentRecord({ provider, orderCode, amount, currency, status, description, expiresAt, providerOrderId, providerCaptureId, checkoutUrl, qrCode, bank = {}, rawProviderData, }) {
+export async function createPaymentRecord({ provider, orderCode, amount, currency, status, description, expiresAt, providerOrderId, providerCaptureId, checkoutUrl, qrCode, bank = {}, rawProviderData, }) {
     const now = new Date().toISOString();
-    return savePayment({
+    return await savePayment({
         paymentId: createPaymentId(provider, orderCode),
         orderCode,
         provider,
@@ -23,8 +23,8 @@ export function createPaymentRecord({ provider, orderCode, amount, currency, sta
         rawProviderData,
     });
 }
-export function markPaymentPaid(payment, update) {
-    return savePayment({
+export async function markPaymentPaid(payment, update) {
+    return await savePayment({
         ...payment,
         status: 'PAID',
         providerCaptureId: update.providerCaptureId || payment.providerCaptureId,
@@ -36,8 +36,8 @@ export function markPaymentPaid(payment, update) {
         updatedAt: new Date().toISOString(),
     });
 }
-export function updatePaymentRecord(payment, update) {
-    return savePayment({
+export async function updatePaymentRecord(payment, update) {
+    return await savePayment({
         ...payment,
         ...update,
         updatedAt: new Date().toISOString(),

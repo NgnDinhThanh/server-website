@@ -1,20 +1,28 @@
-const payments = new Map();
-export function getPayment(paymentId) {
-    return payments.get(paymentId);
+import { PaymentModel } from '../models/Payment.js';
+function sanitizePayment(payment) {
+    const { rawProviderData, rawProviderStatus, webhook, ...stored } = payment;
+    return stored;
 }
-export function getPaymentByOrderCode(orderCode) {
-    return Array.from(payments.values()).find(payment => String(payment.orderCode) === String(orderCode));
+export async function getPayment(paymentId) {
+    return ((await PaymentModel.findOne({ paymentId }).lean()) || undefined);
 }
-export function findPaymentByProviderOrderId(providerOrderId) {
-    return Array.from(payments.values()).find(payment => payment.providerOrderId === providerOrderId);
+export async function getPaymentByOrderCode(orderCode) {
+    return ((await PaymentModel.findOne({ orderCode: Number(orderCode) }).lean()) ||
+        undefined);
 }
-export function findPaymentByProviderCaptureId(providerCaptureId) {
-    return Array.from(payments.values()).find(payment => payment.providerCaptureId === providerCaptureId);
+export async function findPaymentByProviderOrderId(providerOrderId) {
+    return ((await PaymentModel.findOne({ providerOrderId }).lean()) ||
+        undefined);
 }
-export function savePayment(payment) {
-    payments.set(payment.paymentId, payment);
-    return payment;
+export async function findPaymentByProviderCaptureId(providerCaptureId) {
+    return ((await PaymentModel.findOne({ providerCaptureId }).lean()) ||
+        undefined);
 }
-export function listPayments() {
-    return Array.from(payments.values());
+export async function savePayment(payment) {
+    const stored = sanitizePayment(payment);
+    const saved = await PaymentModel.findOneAndUpdate({ paymentId: stored.paymentId }, stored, { new: true, upsert: true, setDefaultsOnInsert: true }).lean();
+    return (saved || stored);
+}
+export async function listPayments() {
+    return (await PaymentModel.find().lean());
 }

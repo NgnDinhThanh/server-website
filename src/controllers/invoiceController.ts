@@ -9,6 +9,7 @@ import {
 	refreshPublishedInvoice,
 	sendInvoiceEmail,
 } from '../services/invoiceService.js'
+import { assertOrderOwner } from '../utils/authenticatedRequest.js'
 
 export async function getMisaInvoiceTemplates(
 	req: Request,
@@ -31,8 +32,9 @@ export async function getInvoiceStatus(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const updatedOrder = await refreshPublishedInvoice(order)
-		res.json(publicOrder(updatedOrder))
+		res.json(await publicOrder(updatedOrder))
 	} catch (error) {
 		next(error)
 	}
@@ -46,8 +48,9 @@ export async function previewOrderInvoice(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const updatedOrder = await previewInvoice(order)
-		res.json(publicOrder(updatedOrder))
+		res.json(await publicOrder(updatedOrder))
 	} catch (error) {
 		next(error)
 	}
@@ -61,8 +64,9 @@ export async function issueOrderInvoice(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const updatedOrder = await publishInvoice(order)
-		res.json(publicOrder(updatedOrder))
+		res.json(await publicOrder(updatedOrder))
 	} catch (error) {
 		next(error)
 	}
@@ -76,8 +80,9 @@ export async function publishOrderInvoice(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const updatedOrder = await publishInvoice(order)
-		res.json(publicOrder(updatedOrder))
+		res.json(await publicOrder(updatedOrder))
 	} catch (error) {
 		next(error)
 	}
@@ -91,6 +96,7 @@ export async function downloadOrderInvoice(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const file = await downloadInvoice(order)
 		res.setHeader('Content-Type', file.mimeType)
 		res.setHeader(
@@ -111,6 +117,7 @@ export async function sendOrderInvoiceEmail(
 	try {
 		const order = await getSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
+		assertOrderOwner(req, order)
 		const email =
 			typeof req.body?.email === 'string'
 				? req.body.email
@@ -118,7 +125,7 @@ export async function sendOrderInvoiceEmail(
 					? req.body.receiverEmail
 					: ''
 		const updatedOrder = await sendInvoiceEmail(order, email)
-		res.json(publicOrder(updatedOrder))
+		res.json(await publicOrder(updatedOrder))
 	} catch (error) {
 		next(error)
 	}

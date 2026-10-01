@@ -4,6 +4,8 @@ import { saveOrder } from '../repositories/orderRepository.js'
 import { createMisaInvoicePayload } from './misaInvoiceMapper.js'
 import { getMisa, postMisa } from './misaHttpClient.js'
 import type {
+	InvoiceBuyerMode,
+	InvoiceDeliveryStatus,
 	InvoiceType,
 	InvoiceStatus,
 	MisaApiResponse,
@@ -28,6 +30,7 @@ function isPlainObject(value: unknown): value is InvoiceInput {
 }
 
 function readInvoiceString(invoice: InvoiceInput, key: string): string {
+	if (invoice[key] === undefined || invoice[key] === null) return ''
 	if (typeof invoice[key] !== 'string') {
 		throw createHttpError(`invoice.${key} must be a string`)
 	}
@@ -50,22 +53,72 @@ function isPhone(value: string) {
 	return /^\+?[0-9][0-9\s().-]{7,18}$/.test(value)
 }
 
+function normalizeBuyerMode(value: unknown): InvoiceBuyerMode | null {
+	const buyerMode = String(value || '').trim().toLowerCase()
+	if (buyerMode === 'consumer') return 'consumer'
+	if (buyerMode === 'individual') return 'individual'
+	if (buyerMode === 'business') return 'business'
+	return null
+}
+
+function normalizeAuthorityMode() {
+	const authorityMode = String(config.misa.authorityMode || '').trim().toLowerCase()
+	if (['with_code', 'with-tax-authority-code', 'code', 'true', '1'].includes(authorityMode)) {
+		return 'WITH_TAX_AUTHORITY_CODE' as const
+	}
+	return 'WITHOUT_TAX_AUTHORITY_CODE' as const
+}
+
+function resolveInvoiceMode(value: InvoiceInput) {
+	const explicitBuyerMode = normalizeBuyerMode(value.buyerMode)
+	const detailsProvided =
+		typeof value.detailsProvided === 'boolean'
+			? value.detailsProvided
+			: typeof value.requested === 'boolean'
+				? value.requested
+				: explicitBuyerMode
+					? explicitBuyerMode !== 'consumer'
+					: false
+	const buyerMode: InvoiceBuyerMode =
+		explicitBuyerMode ||
+		(!detailsProvided
+			? 'consumer'
+			: String(value.type) === 'business'
+				? 'business'
+				: 'individual')
+	const type: InvoiceType = buyerMode === 'business' ? 'business' : 'individual'
+
+	return {
+		buyerMode,
+		type,
+		detailsProvided: buyerMode !== 'consumer' && detailsProvided,
+	}
+}
+
 export function normalizeInvoice(value: unknown): OrderInvoice {
 	if (!isPlainObject(value)) {
 		throw createHttpError('invoice is required')
 	}
-	if (typeof value.requested !== 'boolean') {
-		throw createHttpError('invoice.requested must be a boolean')
-	}
-	if (!['individual', 'business'].includes(String(value.type))) {
+	const normalizedMode = resolveInvoiceMode(value)
+	if (
+		normalizedMode.buyerMode !== 'consumer' &&
+		!['individual', 'business'].includes(String(value.type || normalizedMode.type))
+	) {
 		throw createHttpError('invoice.type must be individual or business')
 	}
 
 	const invoice: OrderInvoice = {
 		provider: 'misa',
-		requested: value.requested,
-		type: value.type as InvoiceType,
-		status: value.requested ? 'REQUESTED' : 'NOT_REQUESTED',
+		required: true,
+		detailsProvided: normalizedMode.detailsProvided,
+		buyerMode: normalizedMode.buyerMode,
+		visibility: normalizedMode.detailsProvided
+			? 'customer_visible'
+			: 'seller_internal',
+		authorityMode: normalizeAuthorityMode(),
+		requested: normalizedMode.detailsProvided,
+		type: normalizedMode.type,
+		status: normalizedMode.detailsProvided ? 'REQUESTED' : 'NOT_REQUESTED',
 		buyerName: readInvoiceString(value, 'buyerName'),
 		buyerCompanyName: readInvoiceString(value, 'buyerCompanyName'),
 		buyerTaxCode: readInvoiceString(value, 'buyerTaxCode'),
@@ -88,8 +141,13 @@ export function normalizeInvoice(value: unknown): OrderInvoice {
 			typeof value.emailDeliveryRequested === 'boolean'
 				? value.emailDeliveryRequested
 				: Boolean(typeof value.buyerEmail === 'string' && value.buyerEmail.trim()),
+		deliveryStatus: 'NOT_REQUESTED',
 		emailSentAt: null,
 		emailError: null,
+		accountDeliveryEmail: '',
+		accountDeliveryStatus: 'NOT_REQUESTED',
+		accountEmailSentAt: null,
+		accountEmailError: null,
 		previewUrl: null,
 		downloadUrl: null,
 		invoiceNumber: null,
@@ -108,9 +166,9 @@ export function normalizeInvoice(value: unknown): OrderInvoice {
 		updatedAt: new Date().toISOString(),
 	}
 
-	if (!invoice.requested) return invoice
+	if (!invoice.detailsProvided) return invoice
 
-	if (invoice.type === 'individual') {
+	if (invoice.buyerMode === 'individual') {
 		if (!invoice.buyerName) {
 			throw createHttpError('invoice.buyerName is required')
 		}
@@ -136,7 +194,7 @@ export function normalizeInvoice(value: unknown): OrderInvoice {
 		}
 	}
 
-	if (invoice.type === 'business') {
+	if (invoice.buyerMode === 'business') {
 		if (!invoice.buyerCompanyName) {
 			throw createHttpError('invoice.buyerCompanyName is required')
 		}
@@ -173,7 +231,7 @@ function assertPaidInvoiceOrder(order: Order) {
 	if (order.status !== 'PAID') {
 		throw createHttpError('Invoice can only be processed after payment is paid')
 	}
-	if (!order.invoice.requested) {
+	if (!order.invoice.detailsProvided) {
 		throw createHttpError('Invoice was not requested for this order')
 	}
 }
@@ -185,9 +243,14 @@ function assertPaidOrder(order: Order) {
 }
 
 function applyConsumerInvoiceDefaults(order: Order) {
-	if (order.invoice.requested) return
+	if (order.invoice.detailsProvided) return
 
+	order.invoice.required = true
+	order.invoice.detailsProvided = false
+	order.invoice.buyerMode = 'consumer'
+	order.invoice.visibility = 'seller_internal'
 	order.invoice.type = 'individual'
+	order.invoice.requested = false
 	order.invoice.buyerName = CONSUMER_BUYER_NAME
 	order.invoice.buyerCompanyName = ''
 	order.invoice.buyerTaxCode = ''
@@ -197,8 +260,62 @@ function applyConsumerInvoiceDefaults(order: Order) {
 	order.invoice.buyerPhone = ''
 	order.invoice.deliveryEmail = ''
 	order.invoice.emailDeliveryRequested = false
+	order.invoice.deliveryStatus = 'NOT_REQUESTED'
 	order.invoice.emailSentAt = null
 	order.invoice.emailError = null
+	order.invoice.accountDeliveryEmail = ''
+	order.invoice.accountDeliveryStatus = 'NOT_REQUESTED'
+	order.invoice.accountEmailSentAt = null
+	order.invoice.accountEmailError = null
+}
+
+function logInvoiceState(order: Order, event: string, error?: unknown) {
+	console.info('OCC invoice state', {
+		event,
+		orderCode: order.orderCode,
+		userId: order.userId,
+		buyerMode: order.invoice.buyerMode,
+		detailsProvided: order.invoice.detailsProvided,
+		invoiceStatus: order.invoice.status,
+		misaRefId: order.invoice.misa.refId,
+		misaTransactionId: order.invoice.misa.transactionId,
+		invoiceNumber: order.invoice.invoiceNumber,
+		invoiceSeries: order.invoice.misa.invoiceSeries,
+		issuedAt: order.invoice.issuedAt,
+		taxAuthorityCode: order.invoice.misa.taxAuthorityCode,
+		error: error instanceof Error ? error.message : error ? String(error) : null,
+	})
+}
+
+function invoiceStateSnapshot(order: Order) {
+	return JSON.stringify({
+		status: order.invoice.status,
+		publishStatus: order.invoice.misa.publishStatus,
+		sendTaxStatus: order.invoice.misa.sendTaxStatus,
+		taxAuthorityCode: order.invoice.misa.taxAuthorityCode,
+		downloadUrl: order.invoice.downloadUrl,
+		accountDeliveryStatus: order.invoice.accountDeliveryStatus,
+		deliveryStatus: order.invoice.deliveryStatus,
+		accountEmailSentAt: order.invoice.accountEmailSentAt,
+		emailSentAt: order.invoice.emailSentAt,
+		error: order.invoice.error,
+	})
+}
+
+function hasPendingInvoiceEmailDelivery(order: Order) {
+	return (
+		order.invoice.accountDeliveryStatus === 'PENDING' ||
+		order.invoice.deliveryStatus === 'PENDING'
+	)
+}
+
+function needsPublishedInvoiceStatusRefresh(order: Order) {
+	if (hasPendingInvoiceEmailDelivery(order)) return true
+	return Boolean(
+		order.invoice.detailsProvided &&
+			isInvoiceCodeMode() &&
+			!order.invoice.misa.taxAuthorityCode
+	)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -440,20 +557,94 @@ function isFailedStatus(status: Record<string, unknown>) {
 	)
 }
 
+function readBoolean(value: unknown): boolean | null {
+	if (typeof value === 'boolean') return value
+	if (typeof value === 'number') return value === 1
+	if (typeof value === 'string') {
+		const normalized = value.trim().toLowerCase()
+		if (['true', '1', 'yes'].includes(normalized)) return true
+		if (['false', '0', 'no'].includes(normalized)) return false
+	}
+	return null
+}
+
+function markPendingInvoiceEmailsSent(order: Order) {
+	const sentAt = new Date().toISOString()
+	let changed = false
+
+	if (order.invoice.accountDeliveryStatus === 'PENDING') {
+		order.invoice.accountDeliveryStatus = 'SENT'
+		order.invoice.accountEmailSentAt = order.invoice.accountEmailSentAt || sentAt
+		order.invoice.accountEmailError = null
+		changed = true
+	}
+
+	if (order.invoice.deliveryStatus === 'PENDING') {
+		order.invoice.deliveryStatus = 'SENT'
+		order.invoice.emailSentAt = order.invoice.emailSentAt || sentAt
+		order.invoice.emailError = null
+		changed = true
+	}
+
+	if (changed) {
+		order.invoice.updatedAt = sentAt
+	}
+}
+
 function isInvoiceReadyForEmail(order: Order) {
-	if (!isInvoiceCodeMode()) return true
-	return (
-		Boolean(order.invoice.misa.taxAuthorityCode) ||
-		order.invoice.misa.sendTaxStatus === '1'
-	)
+	if (!isInvoiceCodeMode()) return false
+	return Boolean(order.invoice.misa.taxAuthorityCode)
+}
+
+function resolveMisaEmailDeliveryStatus(
+	sendEmailResult: Record<string, unknown>
+): InvoiceDeliveryStatus {
+	const status =
+		readString(sendEmailResult.SendEmailStatus) ||
+		readString(sendEmailResult.Status) ||
+		readString(sendEmailResult.status)
+
+	if (status === '3') return 'SENT'
+	if (status === '2') return 'FAILED'
+	return 'PENDING'
+}
+
+function applyInvoiceEmailDeliveryStatus(
+	order: Order,
+	receiverEmail: string,
+	deliveryStatus: InvoiceDeliveryStatus,
+	options?: { deliveryTarget?: 'customer_extra' | 'account' }
+) {
+	const now = new Date().toISOString()
+	order.invoice.updatedAt = now
+
+	if (options?.deliveryTarget === 'account') {
+		order.invoice.accountDeliveryEmail = receiverEmail
+		order.invoice.accountDeliveryStatus = deliveryStatus
+		order.invoice.accountEmailError = null
+		if (deliveryStatus === 'SENT') {
+			order.invoice.accountEmailSentAt = order.invoice.accountEmailSentAt || now
+		}
+		return
+	}
+
+	order.invoice.deliveryEmail = receiverEmail
+	order.invoice.emailDeliveryRequested = true
+	order.invoice.deliveryStatus = deliveryStatus
+	order.invoice.emailError = null
+	if (deliveryStatus === 'SENT') {
+		order.invoice.emailSentAt = order.invoice.emailSentAt || now
+	}
 }
 
 async function syncPublishedInvoiceStatus(order: Order) {
 	const transactionId = order.invoice.misa.transactionId
 	if (!transactionId) return order
 
+	const beforeState = invoiceStateSnapshot(order)
+	const statusPath = misaOperationPath('status')
 	const response = await postMisa<MisaApiResponse<string | MisaInvoiceStatusResult[]>>(
-		misaOperationPath('status'),
+		statusPath,
 		[transactionId]
 	)
 	const statuses = asArray(unwrapMisaData(response))
@@ -479,8 +670,15 @@ async function syncPublishedInvoiceStatus(order: Order) {
 		order.invoice.misa.taxAuthorityCode
 	order.invoice.misa.rawStatus =
 		JSON.stringify(status) || order.invoice.misa.rawStatus
+	if (readBoolean(status.IsSentEmail) === true) {
+		markPendingInvoiceEmailsSent(order)
+	}
 
-	return saveOrder(order)
+	const savedOrder = await saveOrder(order)
+	if (invoiceStateSnapshot(savedOrder) !== beforeState) {
+		logInvoiceState(savedOrder, 'status-refreshed')
+	}
+	return savedOrder
 }
 
 async function pollPublishedInvoiceStatus(order: Order) {
@@ -508,7 +706,9 @@ async function pollPublishedInvoiceStatus(order: Order) {
 async function loadPublishedInvoiceView(order: Order) {
 	const transactionId = order.invoice.misa.transactionId
 	if (!transactionId) return order
+	if (order.invoice.downloadUrl) return order
 
+	const beforeState = invoiceStateSnapshot(order)
 	const response = await postMisa<MisaApiResponse<string>>(
 		misaOperationPath('publishView'),
 		[transactionId]
@@ -533,10 +733,18 @@ async function loadPublishedInvoiceView(order: Order) {
 		order.invoice.error = null
 		order.invoice.updatedAt = new Date().toISOString()
 	}
-	return saveOrder(order)
+	const savedOrder = await saveOrder(order)
+	if (invoiceStateSnapshot(savedOrder) !== beforeState) {
+		logInvoiceState(savedOrder, 'publish-view-refreshed')
+	}
+	return savedOrder
 }
 
-async function sendPublishedInvoiceEmail(order: Order, email?: string) {
+async function sendPublishedInvoiceEmail(
+	order: Order,
+	email?: string,
+	options?: { deliveryTarget?: 'customer_extra' | 'account' }
+) {
 	const transactionId = order.invoice.misa.transactionId
 	const receiverEmail = email?.trim() || order.invoice.deliveryEmail
 	if (!transactionId || !receiverEmail) return order
@@ -546,41 +754,79 @@ async function sendPublishedInvoiceEmail(order: Order, email?: string) {
 			{
 				TransactionID: transactionId,
 				ReceiverName:
-					order.invoice.buyerName || order.invoice.buyerCompanyName || order.user.name || '',
+					order.invoice.buyerName || order.invoice.buyerCompanyName || order.userSnapshot.name || '',
 				ReceiverEmail: receiverEmail,
 				CCEmail: '',
+				BCCEmail: null,
 				ReplyEmail: '',
 			},
 		],
 		IsInvoiceCode: isInvoiceCodeForEmail(),
 		IsInvoiceCalculatingMachine: isInvoiceCalculatingMachine(),
 	}
-	const response = await postMisa<MisaApiResponse<string>>(misaOperationPath('sendEmail'), payload)
+	const sendEmailPath = misaOperationPath('sendEmail')
+	const response = await postMisa<MisaApiResponse<string>>(sendEmailPath, payload)
 	const data = unwrapMisaData(response)
 	const sendEmailResult = asRecord(asArray(data)[0])
 	const errorCode =
 		readString(sendEmailResult.ErrorCode) || readString(sendEmailResult.errorCode)
-	const sendEmailStatus =
-		readString(sendEmailResult.SendEmailStatus) ||
-		readString(sendEmailResult.Status) ||
-		readString(sendEmailResult.status)
-	if (errorCode || sendEmailStatus === '2') {
+	const deliveryStatus = resolveMisaEmailDeliveryStatus(sendEmailResult)
+	if (errorCode || deliveryStatus === 'FAILED') {
 		throw createHttpError(
 			`MISA invoice email failed: ${errorCode || 'SendEmailStatus=2'}`,
 			502
 		)
 	}
-	order.invoice.emailSentAt = new Date().toISOString()
-	order.invoice.updatedAt = order.invoice.emailSentAt
-	order.invoice.emailError = null
-	order.invoice.deliveryEmail = receiverEmail
-	order.invoice.emailDeliveryRequested = true
-	return saveOrder(order)
+
+	applyInvoiceEmailDeliveryStatus(
+		order,
+		receiverEmail,
+		deliveryStatus,
+		options
+	)
+	return await saveOrder(order)
+}
+
+async function sendAccountInvoiceEmailAfterPublish(order: Order) {
+	if (!order.invoice.detailsProvided || order.invoice.status !== 'PUBLISHED') {
+		return order
+	}
+
+	const accountEmail = String(order.userSnapshot.email || '').trim()
+	if (!isEmail(accountEmail)) return order
+	if (!isInvoiceReadyForEmail(order)) return order
+	if (
+		order.invoice.accountDeliveryEmail === accountEmail &&
+		(order.invoice.accountDeliveryStatus === 'SENT' ||
+			order.invoice.accountDeliveryStatus === 'PENDING')
+	) {
+		return order
+	}
+
+	order.invoice.accountDeliveryEmail = accountEmail
+	order.invoice.accountDeliveryStatus = 'PENDING'
+	order.invoice.accountEmailError = null
+	order.invoice.updatedAt = new Date().toISOString()
+	let savedOrder = await saveOrder(order)
+
+	try {
+		savedOrder = await sendPublishedInvoiceEmail(savedOrder, accountEmail, {
+			deliveryTarget: 'account',
+		})
+		return savedOrder
+	} catch (error) {
+		savedOrder.invoice.accountDeliveryStatus = 'FAILED'
+		savedOrder.invoice.accountEmailError =
+			error instanceof Error ? error.message : 'MISA invoice email failed'
+		savedOrder.invoice.updatedAt = new Date().toISOString()
+		savedOrder = await saveOrder(savedOrder)
+		return savedOrder
+	}
 }
 
 export async function sendInvoiceEmail(order: Order, email: string) {
 	assertPaidOrder(order)
-	if (!order.invoice.requested) {
+	if (!order.invoice.detailsProvided) {
 		throw createHttpError('Invoice email is only available for customer invoices', 409)
 	}
 
@@ -602,6 +848,12 @@ export async function sendInvoiceEmail(order: Order, email: string) {
 	if (!refreshedOrder.invoice.misa.transactionId) {
 		throw createHttpError('MISA invoice transaction id is missing', 500)
 	}
+	if (!isInvoiceReadyForEmail(refreshedOrder)) {
+		throw createHttpError(
+			'Invoice email can only be sent after MISA tax authority code is available',
+			409
+		)
+	}
 
 	return sendPublishedInvoiceEmail(refreshedOrder, receiverEmail)
 }
@@ -615,7 +867,8 @@ async function completePublishedInvoice(order: Order) {
 		savedOrder.invoice.error =
 			error instanceof Error ? error.message : 'Invoice status sync failed'
 		savedOrder.invoice.updatedAt = new Date().toISOString()
-		savedOrder = saveOrder(savedOrder)
+		savedOrder = await saveOrder(savedOrder)
+		logInvoiceState(savedOrder, 'status-refresh-failed', error)
 		return savedOrder
 	}
 
@@ -628,21 +881,22 @@ async function completePublishedInvoice(order: Order) {
 				savedOrder.invoice.status = 'PUBLISHING'
 				savedOrder.invoice.error = null
 				savedOrder.invoice.updatedAt = new Date().toISOString()
-				return saveOrder(savedOrder)
+				return await saveOrder(savedOrder)
 			}
 		} catch {
 			// publishview is only available after MISA finishes processing.
 			savedOrder.invoice.status = 'PUBLISHING'
 			savedOrder.invoice.error = null
 			savedOrder.invoice.updatedAt = new Date().toISOString()
-			return saveOrder(savedOrder)
+			return await saveOrder(savedOrder)
 		}
 	}
 
 	savedOrder.invoice.status = 'PUBLISHED'
 	savedOrder.invoice.error = null
 	savedOrder.invoice.updatedAt = new Date().toISOString()
-	savedOrder = saveOrder(savedOrder)
+	savedOrder = await saveOrder(savedOrder)
+	logInvoiceState(savedOrder, 'published')
 
 	try {
 		savedOrder = await loadPublishedInvoiceView(savedOrder)
@@ -650,8 +904,11 @@ async function completePublishedInvoice(order: Order) {
 		savedOrder.invoice.error =
 			error instanceof Error ? error.message : 'Invoice publish view failed'
 		savedOrder.invoice.updatedAt = new Date().toISOString()
-		savedOrder = saveOrder(savedOrder)
+		savedOrder = await saveOrder(savedOrder)
+		logInvoiceState(savedOrder, 'publish-view-failed', error)
 	}
+
+	savedOrder = await sendAccountInvoiceEmailAfterPublish(savedOrder)
 
 	return savedOrder
 }
@@ -665,19 +922,42 @@ export async function refreshPublishedInvoice(
 		order.invoice.status === 'PUBLISHED'
 
 	if (!hasPublishedTransaction || !canRefresh) return order
+	if (order.invoice.status === 'PUBLISHED') {
+		let savedOrder = order
+
+		if (needsPublishedInvoiceStatusRefresh(savedOrder)) {
+			savedOrder = await syncPublishedInvoiceStatus(savedOrder)
+		}
+
+		try {
+			savedOrder = await loadPublishedInvoiceView(savedOrder)
+		} catch (error) {
+			if (!savedOrder.invoice.downloadUrl) {
+				savedOrder.invoice.error =
+					error instanceof Error ? error.message : 'Invoice publish view failed'
+				savedOrder.invoice.updatedAt = new Date().toISOString()
+				savedOrder = await saveOrder(savedOrder)
+				logInvoiceState(savedOrder, 'publish-view-failed', error)
+			}
+		}
+
+		return sendAccountInvoiceEmailAfterPublish(savedOrder)
+	}
 	return completePublishedInvoice(order)
 }
 
 const extractIssueResult = extractPublishResult
 
-function markInvoiceFailed(order: Order, error: unknown) {
+async function markInvoiceFailed(order: Order, error: unknown) {
 	order.invoice.status = 'FAILED'
 	order.invoice.error = error instanceof Error ? error.message : 'Invoice request failed'
 	order.invoice.updatedAt = new Date().toISOString()
-	return saveOrder(order)
+	const savedOrder = await saveOrder(order)
+	logInvoiceState(savedOrder, 'failed', error)
+	return savedOrder
 }
 
-function markInvoicePreviewFailed(
+async function markInvoicePreviewFailed(
 	order: Order,
 	error: unknown,
 	fallbackStatus: InvoiceStatus
@@ -686,7 +966,7 @@ function markInvoicePreviewFailed(
 	order.invoice.error =
 		error instanceof Error ? error.message : 'Invoice preview request failed'
 	order.invoice.updatedAt = new Date().toISOString()
-	return saveOrder(order)
+	return await saveOrder(order)
 }
 
 function readQueryString(value: unknown): string | null {
@@ -757,9 +1037,9 @@ export async function previewInvoice(
 		order.invoice.misa.rawStatus = result.rawStatus
 		order.invoice.error = null
 		order.invoice.updatedAt = new Date().toISOString()
-		return saveOrder(order)
+		return await saveOrder(order)
 	} catch (error) {
-		return markInvoicePreviewFailed(
+		return await markInvoicePreviewFailed(
 			order,
 			error,
 			options.status || order.invoice.status || 'REQUESTED'
@@ -771,14 +1051,14 @@ export async function preparePaidInvoice(order: Order): Promise<Order> {
 	assertPaidOrder(order)
 
 	if (order.invoice.status === 'PUBLISHED') {
-		return order
+		return refreshPublishedInvoice(order)
 	}
 
 	if (order.invoice.status === 'PUBLISHING') {
 		return refreshPublishedInvoice(order)
 	}
 
-	if (order.invoice.requested) {
+	if (order.invoice.detailsProvided) {
 		if (order.invoice.status === 'REQUESTED' || order.invoice.status === 'PREVIEW_READY') {
 			return publishInvoice(order)
 		}
@@ -801,7 +1081,8 @@ async function publishPaidInvoice(order: Order): Promise<Order> {
 	order.invoice.status = 'PUBLISHING'
 	order.invoice.error = null
 	order.invoice.updatedAt = new Date().toISOString()
-	saveOrder(order)
+	await saveOrder(order)
+	logInvoiceState(order, 'publish-started')
 
 	const payload = createMisaInvoicePayload(order)
 	const publishPayload: MisaPublishingPayload = {
@@ -814,7 +1095,6 @@ async function publishPaidInvoice(order: Order): Promise<Order> {
 			misaOperationPath('publish'),
 			publishPayload
 		)
-		console.log('MISA publish response:', response)
 		const result = extractPublishResult(response, payload)
 		order.invoice.status = 'PUBLISHING'
 		order.invoice.invoiceNumber = result.invoiceNumber
@@ -828,10 +1108,11 @@ async function publishPaidInvoice(order: Order): Promise<Order> {
 		order.invoice.error = null
 		order.invoice.emailError = null
 		order.invoice.updatedAt = new Date().toISOString()
-		const savedOrder = saveOrder(order)
+		const savedOrder = await saveOrder(order)
+		logInvoiceState(savedOrder, 'publish-result-received')
 		return refreshPublishedInvoice(savedOrder)
 	} catch (error) {
-		return markInvoiceFailed(order, error)
+		return await markInvoiceFailed(order, error)
 	}
 }
 

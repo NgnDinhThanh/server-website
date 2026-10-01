@@ -1,19 +1,32 @@
 import type { Order } from '../types.js'
+import { OrderModel } from '../models/Order.js'
 
-const orders = new Map<string, Order>()
 const paymentCreationLocks = new Map<string, Promise<Order>>()
 
-export function getOrder(orderCode: number | string): Order | undefined {
-	return orders.get(String(orderCode))
+function toOrder(value: unknown): Order | undefined {
+	if (!value) return undefined
+	const object =
+		typeof (value as { toObject?: () => unknown }).toObject === 'function'
+			? (value as { toObject: () => unknown }).toObject()
+			: value
+	return object as Order
 }
 
-export function saveOrder(order: Order): Order {
-	orders.set(String(order.orderCode), order)
-	return order
+export async function getOrder(orderCode: number | string): Promise<Order | undefined> {
+	return toOrder(await OrderModel.findOne({ orderCode: Number(orderCode) }).lean())
 }
 
-export function listOrders(): Order[] {
-	return Array.from(orders.values())
+export async function saveOrder(order: Order): Promise<Order> {
+	const saved = await OrderModel.findOneAndUpdate(
+		{ orderCode: order.orderCode },
+		order,
+		{ new: true, upsert: true, setDefaultsOnInsert: true }
+	).lean()
+	return (saved || order) as Order
+}
+
+export async function listOrders(): Promise<Order[]> {
+	return (await OrderModel.find().lean()) as Order[]
 }
 
 export function getPaymentCreationLock(key: string): Promise<Order> | undefined {

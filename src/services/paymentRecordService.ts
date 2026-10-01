@@ -11,7 +11,7 @@ export function createPaymentId(provider: PaymentProvider, orderCode: number) {
 	return `${provider}:${orderCode}`
 }
 
-export function createPaymentRecord({
+export async function createPaymentRecord({
 	provider,
 	orderCode,
 	amount,
@@ -41,7 +41,7 @@ export function createPaymentRecord({
 	rawProviderData?: PaymentRecord['rawProviderData']
 }) {
 	const now = new Date().toISOString()
-	return savePayment({
+	return await savePayment({
 		paymentId: createPaymentId(provider, orderCode),
 		orderCode,
 		provider,
@@ -61,7 +61,7 @@ export function createPaymentRecord({
 	})
 }
 
-export function markPaymentPaid(
+export async function markPaymentPaid(
 	payment: PaymentRecord,
 	update: {
 		providerCaptureId?: string
@@ -72,7 +72,7 @@ export function markPaymentPaid(
 		webhook?: PaymentRecord['webhook']
 	}
 ) {
-	return savePayment({
+	return await savePayment({
 		...payment,
 		status: 'PAID',
 		providerCaptureId: update.providerCaptureId || payment.providerCaptureId,
@@ -85,7 +85,7 @@ export function markPaymentPaid(
 	})
 }
 
-export function updatePaymentRecord(
+export async function updatePaymentRecord(
 	payment: PaymentRecord,
 	update: Partial<
 		Pick<
@@ -102,7 +102,7 @@ export function updatePaymentRecord(
 		>
 	>
 ) {
-	return savePayment({
+	return await savePayment({
 		...payment,
 		...update,
 		updatedAt: new Date().toISOString(),

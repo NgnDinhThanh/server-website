@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { publicOrder } from '../presenters/orderPresenter.js';
 import { applyPaypalWebhookUpdate, capturePaypalPayment as capturePaypalPaymentService, createPaypalPayment as createPaypalPaymentService, getPaypalSyncedOrder, } from '../services/paypalPaymentService.js';
 import { isTransientPaypalRequestError, } from '../services/paypalService.js';
+import { assertOrderOwner, getAuthenticatedUserSnapshot, } from '../utils/authenticatedRequest.js';
 export function getPaypalConfig(req, res) {
     res.json({
         enabled: config.paypal.enabled,
@@ -12,8 +13,8 @@ export function getPaypalConfig(req, res) {
 }
 export async function createPaypalPayment(req, res, next) {
     try {
-        const order = await createPaypalPaymentService(req.body);
-        const response = publicOrder(order);
+        const order = await createPaypalPaymentService(req.body, getAuthenticatedUserSnapshot(req));
+        const response = await publicOrder(order);
         if (response.reused) {
             return res.json(response);
         }
@@ -25,8 +26,8 @@ export async function createPaypalPayment(req, res, next) {
 }
 export async function capturePaypalPayment(req, res, next) {
     try {
-        const order = await capturePaypalPaymentService(String(req.params.paypalOrderId || ''));
-        res.json(publicOrder(order));
+        const order = await capturePaypalPaymentService(String(req.params.paypalOrderId || ''), getAuthenticatedUserSnapshot(req));
+        res.json(await publicOrder(order));
     }
     catch (error) {
         next(error);
@@ -37,7 +38,8 @@ export async function getPaypalPaymentStatus(req, res, next) {
         const order = await getPaypalSyncedOrder(String(req.params.orderCode || ''));
         if (!order)
             return res.status(404).json({ error: 'Order not found' });
-        res.json(publicOrder(order));
+        assertOrderOwner(req, order);
+        res.json(await publicOrder(order));
     }
     catch (error) {
         next(error);

@@ -1,11 +1,11 @@
-const subscriptions = new Map();
-export function getSubscription(accountId) {
-    return subscriptions.get(accountId);
+import { SubscriptionModel } from '../models/Subscription.js';
+export async function getSubscription(userId) {
+    return ((await SubscriptionModel.findOne({ userId }).lean()) || undefined);
 }
-export function saveSubscription(subscription) {
-    subscriptions.set(subscription.accountId, subscription);
-    return subscription;
+export async function saveSubscription(subscription) {
+    const saved = await SubscriptionModel.findOneAndUpdate({ userId: subscription.userId }, subscription, { new: true, upsert: true, setDefaultsOnInsert: true }).lean();
+    return (saved || subscription);
 }
-export function listSubscriptions() {
-    return Array.from(subscriptions.values());
+export async function listSubscriptions() {
+    return (await SubscriptionModel.find().lean());
 }

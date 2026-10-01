@@ -2,7 +2,6 @@ export type CreatePaymentBody = {
 	planId?: unknown
 	months?: unknown
 	checkoutSessionId?: unknown
-	user?: unknown
 	invoice?: unknown
 }
 

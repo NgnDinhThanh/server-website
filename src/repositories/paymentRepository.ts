@@ -1,40 +1,48 @@
 import type { PaymentRecord } from '../types.js'
+import { PaymentModel } from '../models/Payment.js'
 
-const payments = new Map<string, PaymentRecord>()
-
-export function getPayment(paymentId: string): PaymentRecord | undefined {
-	return payments.get(paymentId)
+function sanitizePayment(payment: PaymentRecord): PaymentRecord {
+	const { rawProviderData, rawProviderStatus, webhook, ...stored } = payment
+	return stored
 }
 
-export function getPaymentByOrderCode(
+export async function getPayment(paymentId: string): Promise<PaymentRecord | undefined> {
+	return ((await PaymentModel.findOne({ paymentId }).lean()) || undefined) as
+		| PaymentRecord
+		| undefined
+}
+
+export async function getPaymentByOrderCode(
 	orderCode: number | string
-): PaymentRecord | undefined {
-	return Array.from(payments.values()).find(
-		payment => String(payment.orderCode) === String(orderCode)
-	)
+): Promise<PaymentRecord | undefined> {
+	return ((await PaymentModel.findOne({ orderCode: Number(orderCode) }).lean()) ||
+		undefined) as PaymentRecord | undefined
 }
 
-export function findPaymentByProviderOrderId(
+export async function findPaymentByProviderOrderId(
 	providerOrderId: string
-): PaymentRecord | undefined {
-	return Array.from(payments.values()).find(
-		payment => payment.providerOrderId === providerOrderId
-	)
+): Promise<PaymentRecord | undefined> {
+	return ((await PaymentModel.findOne({ providerOrderId }).lean()) ||
+		undefined) as PaymentRecord | undefined
 }
 
-export function findPaymentByProviderCaptureId(
+export async function findPaymentByProviderCaptureId(
 	providerCaptureId: string
-): PaymentRecord | undefined {
-	return Array.from(payments.values()).find(
-		payment => payment.providerCaptureId === providerCaptureId
-	)
+): Promise<PaymentRecord | undefined> {
+	return ((await PaymentModel.findOne({ providerCaptureId }).lean()) ||
+		undefined) as PaymentRecord | undefined
 }
 
-export function savePayment(payment: PaymentRecord): PaymentRecord {
-	payments.set(payment.paymentId, payment)
-	return payment
+export async function savePayment(payment: PaymentRecord): Promise<PaymentRecord> {
+	const stored = sanitizePayment(payment)
+	const saved = await PaymentModel.findOneAndUpdate(
+		{ paymentId: stored.paymentId },
+		stored,
+		{ new: true, upsert: true, setDefaultsOnInsert: true }
+	).lean()
+	return (saved || stored) as PaymentRecord
 }
 
-export function listPayments(): PaymentRecord[] {
-	return Array.from(payments.values())
+export async function listPayments(): Promise<PaymentRecord[]> {
+	return (await PaymentModel.find().lean()) as PaymentRecord[]
 }

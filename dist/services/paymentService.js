@@ -3,8 +3,7 @@ import { getOrder, getPaymentCreationLock, listOrders, saveOrder, setPaymentCrea
 import { getPayment, getPaymentByOrderCode } from '../repositories/paymentRepository.js';
 import { createPaymentRequest, getPaymentRequest } from './payosService.js';
 import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js';
-import { applyPaidOrderToSubscription } from './subscriptionService.js';
-import { resolveCheckoutAccount } from './accountService.js';
+import { createPendingActivationRequest } from './activationRequestService.js';
 import { createPaymentRecord, markPaymentPaid, updatePaymentRecord, } from './paymentRecordService.js';
 import { createHttpError } from '../utils/httpError.js';
 function normalizePlanId(value) {
@@ -46,7 +45,7 @@ function createOrderItems({ plan, planId, months, amount, }) {
             unitPrice: amount,
             amount,
             currency: 'VND',
-            taxCategory: null,
+            taxCategory: 'NON_TAXABLE',
             taxRate: null,
             taxAmount: null,
         },
@@ -62,7 +61,36 @@ function normalizeCheckoutSessionId(value) {
     return sessionId;
 }
 function isPendingStatus(status) {
-    return ['PENDING', 'PROCESSING'].includes(String(status || '').toUpperCase());
+    return ['PENDING_PAYMENT'].includes(String(status || '').toUpperCase());
+}
+function toPayosOrderStatus(providerStatus) {
+    const normalized = String(providerStatus || '').toUpperCase();
+    if (normalized === 'PAID')
+        return 'PAID';
+    if (normalized.includes('REFUND'))
+        return 'REFUNDED';
+    if (normalized.includes('EXPIRE'))
+        return 'EXPIRED';
+    if (normalized.includes('CANCEL') ||
+        normalized.includes('VOID') ||
+        normalized.includes('DENIED')) {
+        return 'CANCELLED';
+    }
+    if (normalized.includes('FAIL'))
+        return 'FAILED';
+    return 'PENDING_PAYMENT';
+}
+function canUpdateInvoiceSnapshot(status) {
+    const normalized = String(status || '').toUpperCase();
+    return ![
+        'PAID',
+        'FULFILLED',
+        'CANCELLED',
+        'CANCELED',
+        'EXPIRED',
+        'REFUNDED',
+        'FAILED',
+    ].includes(normalized);
 }
 function isFreshPendingOrder(order, now = Date.now()) {
     if (!isPendingStatus(order.status))
@@ -72,11 +100,11 @@ function isFreshPendingOrder(order, now = Date.now()) {
         return false;
     return now - createdAt <= config.pendingOrderTtlMs;
 }
-function findReusablePendingOrder({ checkoutSessionId, planId, months, amount, }) {
+async function findReusablePendingOrder({ checkoutSessionId, planId, months, amount, }) {
     if (!checkoutSessionId)
         return null;
-    for (const order of listOrders()) {
-        const payment = getPayment(order.paymentId);
+    for (const order of await listOrders()) {
+        const payment = await getPayment(order.paymentId);
         if (payment?.provider === 'payos' &&
             order.checkoutSessionId === checkoutSessionId &&
             order.planId === planId &&
@@ -91,9 +119,9 @@ function findReusablePendingOrder({ checkoutSessionId, planId, months, amount, }
 function createUserKey(user) {
     return user?.id || user?.email || '';
 }
-function findReusableUserPendingOrder({ checkoutSessionId, planId, months, amount, user, }) {
+async function findReusableUserPendingOrder({ checkoutSessionId, planId, months, amount, user, }) {
     const userKey = createUserKey(user);
-    const order = findReusablePendingOrder({
+    const order = await findReusablePendingOrder({
         checkoutSessionId,
         planId,
         months,
@@ -101,7 +129,7 @@ function findReusableUserPendingOrder({ checkoutSessionId, planId, months, amoun
     });
     if (!order)
         return null;
-    return createUserKey(order.user) === userKey ? order : null;
+    return createUserKey(order.userSnapshot) === userKey ? order : null;
 }
 function createPaymentLockKey({ checkoutSessionId, planId, months, amount, user, }) {
     if (!checkoutSessionId)
@@ -117,15 +145,15 @@ function createCancelUrl(orderCode) {
 function resolveBankName(paymentLink) {
     return (bankNamesByBin[String(paymentLink.bin)]);
 }
-export async function createPayment(body) {
+export async function createPayment(body, authenticatedUser) {
     const planId = normalizePlanId(body.planId);
     const plan = plans[planId];
     const months = parseMonths(body.months || 1);
     const amount = calculateAmount(plan, months);
     const checkoutSessionId = normalizeCheckoutSessionId(body.checkoutSessionId);
-    const { account, checkoutUser: user, buyerSnapshot } = resolveCheckoutAccount(body.user);
+    const user = authenticatedUser;
     const invoice = normalizeInvoice(body.invoice);
-    const reusableOrder = findReusableUserPendingOrder({
+    const reusableOrder = await findReusableUserPendingOrder({
         checkoutSessionId,
         planId,
         months,
@@ -159,8 +187,6 @@ export async function createPayment(body) {
         months,
         amount,
         user,
-        accountId: account.accountId,
-        buyerSnapshot,
         invoice,
         checkoutSessionId,
     });
@@ -169,7 +195,7 @@ export async function createPayment(body) {
     }
     return creationPromise;
 }
-async function createNewPaymentOrder({ plan, planId, months, amount, user, accountId, buyerSnapshot, invoice, checkoutSessionId, }) {
+async function createNewPaymentOrder({ plan, planId, months, amount, user, invoice, checkoutSessionId, }) {
     const orderCode = createOrderCode();
     const description = createDescription(orderCode);
     const paymentRequest = {
@@ -189,7 +215,7 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
     const paymentLink = await createPaymentRequest(paymentRequest);
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + config.pendingOrderTtlMs).toISOString();
-    const payment = createPaymentRecord({
+    const payment = await createPaymentRecord({
         provider: 'payos',
         orderCode,
         amount,
@@ -209,7 +235,7 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
         rawProviderData: paymentLink,
     });
     return saveOrder({
-        accountId,
+        userId: user.id,
         paymentId: payment.paymentId,
         orderCode,
         planId,
@@ -218,12 +244,11 @@ async function createNewPaymentOrder({ plan, planId, months, amount, user, accou
         months,
         amount,
         currency: 'VND',
-        user,
-        buyerSnapshot,
+        userSnapshot: user,
         invoice,
         checkoutSessionId,
         description,
-        status: paymentLink.status || 'PENDING',
+        status: 'PENDING_PAYMENT',
         activationStatus: 'NOT_STARTED',
         createdAt: now,
         updatedAt: now,
@@ -236,12 +261,13 @@ export async function syncOrderWithPayos(order) {
         return order.status === 'PAID' ? preparePaidInvoice(order) : order;
     }
     const paymentLink = await getPaymentRequest(order.orderCode);
-    const status = paymentLink.status || order.status;
+    const providerStatus = paymentLink.status || 'PENDING';
+    const orderStatus = toPayosOrderStatus(providerStatus);
     const paidTransaction = paymentLink.transactions?.find((transaction) => transaction.amount > 0);
-    order.status = status;
-    const payment = getPaymentByOrderCode(order.orderCode);
-    if (status === 'PAID' && payment) {
-        markPaymentPaid(payment, {
+    order.status = orderStatus;
+    const payment = await getPaymentByOrderCode(order.orderCode);
+    if (orderStatus === 'PAID' && payment) {
+        await markPaymentPaid(payment, {
             paidAt: paidTransaction?.transactionDateTime || new Date().toISOString(),
             amountPaid: paymentLink.amountPaid,
             amountRemaining: paymentLink.amountRemaining,
@@ -249,57 +275,75 @@ export async function syncOrderWithPayos(order) {
         });
     }
     else if (payment) {
-        updatePaymentRecord(payment, {
-            status,
+        await updatePaymentRecord(payment, {
+            status: providerStatus,
             rawProviderStatus: paymentLink,
         });
     }
     order.activationStatus =
-        status === 'PAID' ? 'ACTIVATING' : order.activationStatus;
+        orderStatus === 'PAID' ? 'PENDING_ADMIN' : order.activationStatus;
     order.paidAt =
-        status === 'PAID'
+        orderStatus === 'PAID'
             ? paidTransaction?.transactionDateTime ||
                 order.paidAt ||
                 new Date().toISOString()
             : order.paidAt;
     order.updatedAt = new Date().toISOString();
-    const savedOrder = saveOrder(order);
-    if (status !== 'PAID')
+    const savedOrder = await saveOrder(order);
+    if (orderStatus !== 'PAID')
         return savedOrder;
-    return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder));
+    await createPendingActivationRequest(savedOrder);
+    return preparePaidInvoice(savedOrder);
 }
 export async function getSyncedOrder(orderCode) {
-    const order = getOrder(orderCode);
+    const order = await getOrder(orderCode);
     if (!order)
         return null;
     return syncOrderWithPayos(order);
 }
-export async function applyWebhookPaymentUpdate(data) {
-    const orderCode = String(data.orderCode);
-    const order = getOrder(orderCode);
+export async function updatePendingOrderInvoice(orderCode, invoiceInput) {
+    const order = await getOrder(orderCode);
     if (!order)
         return null;
-    order.status = data.code === '00' ? 'PAID' : data.desc || 'UNKNOWN';
+    if (!canUpdateInvoiceSnapshot(order.status)) {
+        throw createHttpError('Invoice details can only be updated before payment is paid', 409);
+    }
+    if (order.invoice.status === 'PUBLISHING' ||
+        order.invoice.status === 'PUBLISHED') {
+        throw createHttpError('Invoice is already being processed', 409);
+    }
+    order.invoice = normalizeInvoice(invoiceInput);
+    order.updatedAt = new Date().toISOString();
+    return saveOrder(order);
+}
+export async function applyWebhookPaymentUpdate(data) {
+    const orderCode = String(data.orderCode);
+    const order = await getOrder(orderCode);
+    if (!order)
+        return null;
+    const providerStatus = data.code === '00' ? 'PAID' : data.desc || 'FAILED';
+    order.status = toPayosOrderStatus(providerStatus);
     order.activationStatus =
-        order.status === 'PAID' ? 'ACTIVATING' : 'NOT_STARTED';
+        order.status === 'PAID' ? 'PENDING_ADMIN' : 'NOT_STARTED';
     order.paidAt = data.transactionDateTime || new Date().toISOString();
     order.updatedAt = new Date().toISOString();
-    const payment = getPaymentByOrderCode(order.orderCode);
+    const payment = await getPaymentByOrderCode(order.orderCode);
     if (order.status === 'PAID' && payment) {
-        markPaymentPaid(payment, {
+        await markPaymentPaid(payment, {
             paidAt: order.paidAt,
             amountPaid: data.amount,
             webhook: data,
         });
     }
     else if (payment) {
-        updatePaymentRecord(payment, {
-            status: order.status,
+        await updatePaymentRecord(payment, {
+            status: providerStatus,
             webhook: data,
         });
     }
-    const savedOrder = saveOrder(order);
+    const savedOrder = await saveOrder(order);
     if (order.status !== 'PAID')
         return savedOrder;
-    return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder));
+    await createPendingActivationRequest(savedOrder);
+    return preparePaidInvoice(savedOrder);
 }

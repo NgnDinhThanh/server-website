@@ -16,18 +16,33 @@ function readListEnv(key: string) {
 		.filter(Boolean)
 }
 
+function normalizeOrigin(value: string) {
+	return value.replace(/\/$/, '')
+}
+
 const frontendUrl = readEnv('FRONTEND_URL', 'http://localhost:5173')
 const frontendLocalUrl = readEnv('FRONTEND_LOCAL_URL', 'http://localhost:5173')
+const publicBaseUrl =
+	readEnv('PUBLIC_BASE_URL') || `http://localhost:${readNumberEnv('PORT', 4000)}`
+const emailActivationUrl = readEnv('EMAIL_ACTIVATION_URL')
 
 export const config = {
 	port: readNumberEnv('PORT', 4000),
 	frontendUrl,
 	frontendOrigins: Array.from(
-		new Set([frontendUrl, frontendLocalUrl, ...readListEnv('FRONTEND_URLS')])
+		new Set(
+			[
+				frontendUrl,
+				frontendLocalUrl,
+				publicBaseUrl,
+				emailActivationUrl,
+				...readListEnv('FRONTEND_URLS'),
+			]
+				.filter(Boolean)
+				.map(normalizeOrigin)
+		)
 	),
-	publicBaseUrl:
-		readEnv('PUBLIC_BASE_URL') ||
-		`http://localhost:${readNumberEnv('PORT', 4000)}`,
+	publicBaseUrl: normalizeOrigin(publicBaseUrl),
 	usdToVndRate: readNumberEnv('USD_TO_VND_RATE', 24500),
 	vndRoundingStep: readNumberEnv('VND_ROUNDING_STEP', 1000),
 	forcedTestAmount: readEnv('PAYOS_TEST_AMOUNT')
@@ -133,7 +148,6 @@ export const requiredMisaEnvKeys = [
 	'MISA_INV_TEMPLATE_NO',
 	'MISA_SIGN_TYPE',
 	'MISA_PAYMENT_METHOD',
-	'MISA_VAT_RATE',
 ]
 
 export function getMissingMisaEnv() {

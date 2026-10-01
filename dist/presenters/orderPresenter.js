@@ -1,47 +1,29 @@
 import { config } from '../config.js';
-import { getAccount } from '../repositories/accountRepository.js';
 import { getPayment } from '../repositories/paymentRepository.js';
-function toOrderStatus(status) {
-    const normalized = String(status || '').toUpperCase();
-    if (normalized === 'PAID')
-        return 'PAID';
-    if (normalized.includes('REFUNDED'))
-        return 'REFUNDED';
-    if (normalized.includes('CANCELLED') ||
-        normalized.includes('CANCELED') ||
-        normalized.includes('VOIDED') ||
-        normalized.includes('DENIED')) {
-        return 'CANCELLED';
-    }
-    if (normalized.includes('EXPIRED'))
-        return 'EXPIRED';
-    return 'PENDING_PAYMENT';
-}
-export function publicOrder(order) {
+export async function publicOrder(order) {
     const invoice = order.invoice;
-    const account = getAccount(order.accountId);
-    const payment = getPayment(order.paymentId);
+    const user = order.userSnapshot;
+    const payment = await getPayment(order.paymentId);
     if (!payment) {
         throw new Error(`Payment record not found for order ${order.orderCode}`);
     }
     return {
         orderCode: order.orderCode,
-        accountId: order.accountId,
-        account: account
-            ? {
-                accountId: account.accountId,
-                email: account.email,
-                name: account.name,
-            }
-            : null,
-        buyerSnapshot: order.buyerSnapshot,
+        userId: order.userId,
+        user,
         planId: order.planId,
         planName: order.planName,
         months: order.months,
         amount: order.amount,
         currency: order.currency,
         description: order.description,
-        orderStatus: toOrderStatus(order.status),
+        lifecycle: {
+            orderStatus: order.status,
+            paymentStatus: payment.status,
+            activationStatus: order.activationStatus,
+            invoiceStatus: invoice?.status,
+        },
+        orderStatus: order.status,
         status: order.status,
         activationStatus: order.activationStatus,
         payment: {
@@ -63,7 +45,6 @@ export function publicOrder(order) {
             updatedAt: payment.updatedAt,
             expiresAt: payment.expiresAt,
         },
-        user: order.user,
         items: order.items ?? [],
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
@@ -72,6 +53,12 @@ export function publicOrder(order) {
         subscription: order.subscription ?? null,
         invoiceProvider: invoice?.provider,
         invoiceRequested: invoice?.requested,
+        invoiceRequired: invoice?.required ?? true,
+        invoiceDetailsProvided: invoice?.detailsProvided ?? invoice?.requested ?? false,
+        invoiceBuyerMode: invoice?.buyerMode ?? (invoice?.requested ? invoice?.type : 'consumer'),
+        invoiceVisibility: invoice?.visibility ??
+            (invoice?.requested ? 'customer_visible' : 'seller_internal'),
+        invoiceAuthorityMode: invoice?.authorityMode ?? null,
         invoiceStatus: invoice?.status,
         invoicePreviewUrl: invoice?.previewUrl ?? null,
         invoiceDownloadUrl: invoice?.downloadUrl ?? null,
@@ -80,8 +67,13 @@ export function publicOrder(order) {
         invoiceError: invoice?.error ?? null,
         invoiceDeliveryEmail: invoice?.deliveryEmail ?? null,
         invoiceEmailDeliveryRequested: invoice?.emailDeliveryRequested ?? false,
+        invoiceEmailDeliveryStatus: invoice?.deliveryStatus ?? 'NOT_REQUESTED',
         invoiceEmailSentAt: invoice?.emailSentAt ?? null,
         invoiceEmailError: invoice?.emailError ?? null,
+        invoiceAccountDeliveryEmail: invoice?.accountDeliveryEmail ?? null,
+        invoiceAccountEmailDeliveryStatus: invoice?.accountDeliveryStatus ?? 'NOT_REQUESTED',
+        invoiceAccountEmailSentAt: invoice?.accountEmailSentAt ?? null,
+        invoiceAccountEmailError: invoice?.accountEmailError ?? null,
         invoiceMisaRefId: invoice?.misa.refId ?? null,
         invoiceMisaTransactionId: invoice?.misa.transactionId ?? null,
         invoiceMisaInvoiceId: invoice?.misa.invoiceId ?? null,

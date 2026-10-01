@@ -9,8 +9,7 @@ import {
 import { getPayment, getPaymentByOrderCode } from '../repositories/paymentRepository.js'
 import { createPaymentRequest, getPaymentRequest } from './payosService.js'
 import { normalizeInvoice, preparePaidInvoice } from './invoiceService.js'
-import { applyPaidOrderToSubscription } from './subscriptionService.js'
-import { resolveCheckoutAccount } from './accountService.js'
+import { createPendingActivationRequest } from './activationRequestService.js'
 import {
 	createPaymentRecord,
 	markPaymentPaid,
@@ -18,7 +17,6 @@ import {
 } from './paymentRecordService.js'
 import { createHttpError } from '../utils/httpError.js'
 import type {
-	CheckoutUser,
 	CreatePaymentBody,
 	Order,
 	OrderInvoice,
@@ -26,8 +24,9 @@ import type {
 	PayosWebhookData,
 	Plan,
 	PlanId,
-	BuyerSnapshot,
 	OrderItemSnapshot,
+	OrderStatus,
+	UserSnapshot,
 } from '../types.js'
 
 function normalizePlanId(value: unknown): PlanId {
@@ -86,7 +85,7 @@ function createOrderItems({
 			unitPrice: amount,
 			amount,
 			currency: 'VND',
-			taxCategory: null,
+			taxCategory: 'NON_TAXABLE',
 			taxRate: null,
 			taxAmount: null,
 		},
@@ -103,7 +102,36 @@ function normalizeCheckoutSessionId(value: unknown): string {
 }
 
 function isPendingStatus(status: unknown): boolean {
-	return ['PENDING', 'PROCESSING'].includes(String(status || '').toUpperCase())
+	return ['PENDING_PAYMENT'].includes(String(status || '').toUpperCase())
+}
+
+function toPayosOrderStatus(providerStatus: unknown): OrderStatus {
+	const normalized = String(providerStatus || '').toUpperCase()
+	if (normalized === 'PAID') return 'PAID'
+	if (normalized.includes('REFUND')) return 'REFUNDED'
+	if (normalized.includes('EXPIRE')) return 'EXPIRED'
+	if (
+		normalized.includes('CANCEL') ||
+		normalized.includes('VOID') ||
+		normalized.includes('DENIED')
+	) {
+		return 'CANCELLED'
+	}
+	if (normalized.includes('FAIL')) return 'FAILED'
+	return 'PENDING_PAYMENT'
+}
+
+function canUpdateInvoiceSnapshot(status: unknown): boolean {
+	const normalized = String(status || '').toUpperCase()
+	return ![
+		'PAID',
+		'FULFILLED',
+		'CANCELLED',
+		'CANCELED',
+		'EXPIRED',
+		'REFUNDED',
+		'FAILED',
+	].includes(normalized)
 }
 
 function isFreshPendingOrder(order: Order, now = Date.now()): boolean {
@@ -113,7 +141,7 @@ function isFreshPendingOrder(order: Order, now = Date.now()): boolean {
 	return now - createdAt <= config.pendingOrderTtlMs
 }
 
-function findReusablePendingOrder({
+async function findReusablePendingOrder({
 	checkoutSessionId,
 	planId,
 	months,
@@ -123,11 +151,11 @@ function findReusablePendingOrder({
 	planId: PlanId
 	months: number
 	amount: number
-}): Order | null {
+}): Promise<Order | null> {
 	if (!checkoutSessionId) return null
 
-	for (const order of listOrders()) {
-		const payment = getPayment(order.paymentId)
+	for (const order of await listOrders()) {
+		const payment = await getPayment(order.paymentId)
 		if (
 			payment?.provider === 'payos' &&
 			order.checkoutSessionId === checkoutSessionId &&
@@ -143,11 +171,11 @@ function findReusablePendingOrder({
 	return null
 }
 
-function createUserKey(user?: CheckoutUser): string {
+function createUserKey(user?: UserSnapshot): string {
 	return user?.id || user?.email || ''
 }
 
-function findReusableUserPendingOrder({
+async function findReusableUserPendingOrder({
 	checkoutSessionId,
 	planId,
 	months,
@@ -158,10 +186,10 @@ function findReusableUserPendingOrder({
 	planId: PlanId
 	months: number
 	amount: number
-	user: CheckoutUser
-}): Order | null {
+	user: UserSnapshot
+}): Promise<Order | null> {
 	const userKey = createUserKey(user)
-	const order = findReusablePendingOrder({
+	const order = await findReusablePendingOrder({
 		checkoutSessionId,
 		planId,
 		months,
@@ -169,7 +197,7 @@ function findReusableUserPendingOrder({
 	})
 
 	if (!order) return null
-	return createUserKey(order.user) === userKey ? order : null
+	return createUserKey(order.userSnapshot) === userKey ? order : null
 }
 
 function createPaymentLockKey({
@@ -183,7 +211,7 @@ function createPaymentLockKey({
 	planId: PlanId
 	months: number
 	amount: number
-	user: CheckoutUser
+	user: UserSnapshot
 }): string {
 	if (!checkoutSessionId) return ''
 	return [checkoutSessionId, createUserKey(user), planId, months, amount].join(':')
@@ -203,17 +231,18 @@ function resolveBankName(paymentLink: PayosPaymentLink): string | undefined {
 	)
 }
 
-export async function createPayment(body: CreatePaymentBody): Promise<Order> {
+export async function createPayment(
+	body: CreatePaymentBody,
+	authenticatedUser: UserSnapshot
+): Promise<Order> {
 	const planId = normalizePlanId(body.planId)
 	const plan = plans[planId]
 	const months = parseMonths(body.months || 1)
 	const amount = calculateAmount(plan, months)
 	const checkoutSessionId = normalizeCheckoutSessionId(body.checkoutSessionId)
-	const { account, checkoutUser: user, buyerSnapshot } = resolveCheckoutAccount(
-		body.user
-	)
+	const user = authenticatedUser
 	const invoice = normalizeInvoice(body.invoice)
-	const reusableOrder = findReusableUserPendingOrder({
+	const reusableOrder = await findReusableUserPendingOrder({
 		checkoutSessionId,
 		planId,
 		months,
@@ -251,8 +280,6 @@ export async function createPayment(body: CreatePaymentBody): Promise<Order> {
 		months,
 		amount,
 		user,
-		accountId: account.accountId,
-		buyerSnapshot,
 		invoice,
 		checkoutSessionId,
 	})
@@ -269,8 +296,6 @@ async function createNewPaymentOrder({
 	months,
 	amount,
 	user,
-	accountId,
-	buyerSnapshot,
 	invoice,
 	checkoutSessionId,
 }: {
@@ -278,9 +303,7 @@ async function createNewPaymentOrder({
 	planId: PlanId
 	months: number
 	amount: number
-	user: CheckoutUser
-	accountId: string
-	buyerSnapshot: BuyerSnapshot
+	user: UserSnapshot
 	invoice: OrderInvoice
 	checkoutSessionId: string
 }): Promise<Order> {
@@ -303,7 +326,7 @@ async function createNewPaymentOrder({
 	const paymentLink = await createPaymentRequest(paymentRequest)
 	const now = new Date().toISOString()
 	const expiresAt = new Date(Date.now() + config.pendingOrderTtlMs).toISOString()
-	const payment = createPaymentRecord({
+	const payment = await createPaymentRecord({
 		provider: 'payos',
 		orderCode,
 		amount,
@@ -324,7 +347,7 @@ async function createNewPaymentOrder({
 	})
 
 	return saveOrder({
-		accountId,
+		userId: user.id,
 		paymentId: payment.paymentId,
 		orderCode,
 		planId,
@@ -333,12 +356,11 @@ async function createNewPaymentOrder({
 		months,
 		amount,
 		currency: 'VND',
-		user,
-		buyerSnapshot,
+		userSnapshot: user,
 		invoice,
 		checkoutSessionId,
 		description,
-		status: paymentLink.status || 'PENDING',
+		status: 'PENDING_PAYMENT',
 		activationStatus: 'NOT_STARTED',
 		createdAt: now,
 		updatedAt: now,
@@ -353,75 +375,101 @@ export async function syncOrderWithPayos(order: Order): Promise<Order> {
 	}
 
 	const paymentLink = await getPaymentRequest(order.orderCode)
-	const status = paymentLink.status || order.status
+	const providerStatus = paymentLink.status || 'PENDING'
+	const orderStatus = toPayosOrderStatus(providerStatus)
 	const paidTransaction = paymentLink.transactions?.find(
 		(transaction: Record<string, any>) => transaction.amount > 0
 	)
 
-	order.status = status
-	const payment = getPaymentByOrderCode(order.orderCode)
-	if (status === 'PAID' && payment) {
-		markPaymentPaid(payment, {
+	order.status = orderStatus
+	const payment = await getPaymentByOrderCode(order.orderCode)
+	if (orderStatus === 'PAID' && payment) {
+		await markPaymentPaid(payment, {
 			paidAt: paidTransaction?.transactionDateTime || new Date().toISOString(),
 			amountPaid: paymentLink.amountPaid,
 			amountRemaining: paymentLink.amountRemaining,
 			rawProviderStatus: paymentLink,
 		})
 	} else if (payment) {
-		updatePaymentRecord(payment, {
-			status,
+		await updatePaymentRecord(payment, {
+			status: providerStatus,
 			rawProviderStatus: paymentLink,
 		})
 	}
 	order.activationStatus =
-		status === 'PAID' ? 'ACTIVATING' : order.activationStatus
+		orderStatus === 'PAID' ? 'PENDING_ADMIN' : order.activationStatus
 	order.paidAt =
-		status === 'PAID'
+		orderStatus === 'PAID'
 			? paidTransaction?.transactionDateTime ||
 			order.paidAt ||
 			new Date().toISOString()
 			: order.paidAt
 	order.updatedAt = new Date().toISOString()
-	const savedOrder = saveOrder(order)
-	if (status !== 'PAID') return savedOrder
-	return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder))
+	const savedOrder = await saveOrder(order)
+	if (orderStatus !== 'PAID') return savedOrder
+	await createPendingActivationRequest(savedOrder)
+	return preparePaidInvoice(savedOrder)
 }
 
 export async function getSyncedOrder(
 	orderCode: number | string
 ): Promise<Order | null> {
-	const order = getOrder(orderCode)
+	const order = await getOrder(orderCode)
 	if (!order) return null
 	return syncOrderWithPayos(order)
+}
+
+export async function updatePendingOrderInvoice(
+	orderCode: number | string,
+	invoiceInput: unknown
+): Promise<Order | null> {
+	const order = await getOrder(orderCode)
+	if (!order) return null
+
+	if (!canUpdateInvoiceSnapshot(order.status)) {
+		throw createHttpError('Invoice details can only be updated before payment is paid', 409)
+	}
+	if (
+		order.invoice.status === 'PUBLISHING' ||
+		order.invoice.status === 'PUBLISHED'
+	) {
+		throw createHttpError('Invoice is already being processed', 409)
+	}
+
+	order.invoice = normalizeInvoice(invoiceInput)
+	order.updatedAt = new Date().toISOString()
+	return saveOrder(order)
 }
 
 export async function applyWebhookPaymentUpdate(
 	data: PayosWebhookData
 ): Promise<Order | null> {
 	const orderCode = String(data.orderCode)
-	const order = getOrder(orderCode)
+	const order = await getOrder(orderCode)
 
 	if (!order) return null
 
-	order.status = data.code === '00' ? 'PAID' : data.desc || 'UNKNOWN'
+	const providerStatus = data.code === '00' ? 'PAID' : data.desc || 'FAILED'
+	order.status = toPayosOrderStatus(providerStatus)
 	order.activationStatus =
-		order.status === 'PAID' ? 'ACTIVATING' : 'NOT_STARTED'
+		order.status === 'PAID' ? 'PENDING_ADMIN' : 'NOT_STARTED'
 	order.paidAt = data.transactionDateTime || new Date().toISOString()
 	order.updatedAt = new Date().toISOString()
-	const payment = getPaymentByOrderCode(order.orderCode)
+	const payment = await getPaymentByOrderCode(order.orderCode)
 	if (order.status === 'PAID' && payment) {
-		markPaymentPaid(payment, {
+		await markPaymentPaid(payment, {
 			paidAt: order.paidAt,
 			amountPaid: data.amount,
 			webhook: data,
 		})
 	} else if (payment) {
-		updatePaymentRecord(payment, {
-			status: order.status,
+		await updatePaymentRecord(payment, {
+			status: providerStatus,
 			webhook: data,
 		})
 	}
-	const savedOrder = saveOrder(order)
+	const savedOrder = await saveOrder(order)
 	if (order.status !== 'PAID') return savedOrder
-	return preparePaidInvoice(applyPaidOrderToSubscription(savedOrder))
+	await createPendingActivationRequest(savedOrder)
+	return preparePaidInvoice(savedOrder)
 }

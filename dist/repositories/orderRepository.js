@@ -1,14 +1,22 @@
-const orders = new Map();
+import { OrderModel } from '../models/Order.js';
 const paymentCreationLocks = new Map();
-export function getOrder(orderCode) {
-    return orders.get(String(orderCode));
+function toOrder(value) {
+    if (!value)
+        return undefined;
+    const object = typeof value.toObject === 'function'
+        ? value.toObject()
+        : value;
+    return object;
 }
-export function saveOrder(order) {
-    orders.set(String(order.orderCode), order);
-    return order;
+export async function getOrder(orderCode) {
+    return toOrder(await OrderModel.findOne({ orderCode: Number(orderCode) }).lean());
 }
-export function listOrders() {
-    return Array.from(orders.values());
+export async function saveOrder(order) {
+    const saved = await OrderModel.findOneAndUpdate({ orderCode: order.orderCode }, order, { new: true, upsert: true, setDefaultsOnInsert: true }).lean();
+    return (saved || order);
+}
+export async function listOrders() {
+    return (await OrderModel.find().lean());
 }
 export function getPaymentCreationLock(key) {
     return paymentCreationLocks.get(key);

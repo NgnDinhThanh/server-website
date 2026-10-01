@@ -11,6 +11,10 @@ import {
 	isTransientPaypalRequestError,
 } from '../services/paypalService.js'
 import type { RequestWithRawBody } from '../types.js'
+import {
+	assertOrderOwner,
+	getAuthenticatedUserSnapshot,
+} from '../utils/authenticatedRequest.js'
 
 export function getPaypalConfig(req: Request, res: Response) {
 	res.json({
@@ -27,8 +31,11 @@ export async function createPaypalPayment(
 	next: NextFunction
 ) {
 	try {
-		const order = await createPaypalPaymentService(req.body)
-		const response = publicOrder(order)
+		const order = await createPaypalPaymentService(
+			req.body,
+			getAuthenticatedUserSnapshot(req)
+		)
+		const response = await publicOrder(order)
 		if (response.reused) {
 			return res.json(response)
 		}
@@ -45,9 +52,10 @@ export async function capturePaypalPayment(
 ) {
 	try {
 		const order = await capturePaypalPaymentService(
-			String(req.params.paypalOrderId || '')
+			String(req.params.paypalOrderId || ''),
+			getAuthenticatedUserSnapshot(req)
 		)
-		res.json(publicOrder(order))
+		res.json(await publicOrder(order))
 	} catch (error) {
 		next(error)
 	}
@@ -61,7 +69,8 @@ export async function getPaypalPaymentStatus(
 	try {
 		const order = await getPaypalSyncedOrder(String(req.params.orderCode || ''))
 		if (!order) return res.status(404).json({ error: 'Order not found' })
-		res.json(publicOrder(order))
+		assertOrderOwner(req, order)
+		res.json(await publicOrder(order))
 	} catch (error) {
 		next(error)
 	}

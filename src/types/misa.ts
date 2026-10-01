@@ -132,6 +132,7 @@ export type MisaSendEmailPayload = {
 		ReceiverName: string
 		ReceiverEmail: string
 		CCEmail: string
+		BCCEmail?: string | null
 		ReplyEmail: string
 	}>
 	IsInvoiceCode: boolean

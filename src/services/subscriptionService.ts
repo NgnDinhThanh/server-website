@@ -9,19 +9,21 @@ import {
 	saveSubscriptionEvent,
 } from '../repositories/subscriptionEventRepository.js'
 import { saveOrder } from '../repositories/orderRepository.js'
+import { findUserById, saveUser } from '../repositories/userRepository.js'
 import { createHttpError } from '../utils/httpError.js'
 import type {
 	Order,
 	PlanId,
 	RenewalType,
 	SubscriptionSnapshot,
+	UserPlan,
 } from '../types.js'
 
-function getAccountId(order: Order): string {
-	if (!order.accountId) {
-		throw createHttpError('Cannot activate subscription without account', 500)
+function getOrderUserId(order: Order): string {
+	if (!order.userId) {
+		throw createHttpError('Cannot activate subscription without user', 500)
 	}
-	return order.accountId
+	return order.userId
 }
 
 function addMonths(date: Date, months: number): Date {
@@ -60,15 +62,17 @@ function getRenewalType({
 	return 'RENEWAL'
 }
 
-export function applyPaidOrderToSubscription(order: Order): Order {
+export async function applyPaidOrderToSubscription(order: Order): Promise<Order> {
 	if (order.status !== 'PAID') return order
-	if (order.subscription && hasSubscriptionEventForOrder(order.orderCode)) return order
-	const existingEvent = getSubscriptionEventByOrderCode(order.orderCode)
+	if (order.subscription && (await hasSubscriptionEventForOrder(order.orderCode))) {
+		return order
+	}
+	const existingEvent = await getSubscriptionEventByOrderCode(order.orderCode)
 	if (existingEvent) return order
 
-	const accountId = getAccountId(order)
+	const userId = getOrderUserId(order)
 	const now = new Date()
-	const current = getSubscription(accountId)
+	const current = await getSubscription(userId)
 	const currentIsActive = isActive(current?.expiresAt, now)
 	const baseDate =
 		current && currentIsActive ? new Date(current.expiresAt) : now
@@ -80,8 +84,7 @@ export function applyPaidOrderToSubscription(order: Order): Order {
 		active: currentIsActive,
 	})
 	const snapshot: SubscriptionSnapshot = {
-		userId: accountId,
-		accountId,
+		userId,
 		planId: order.planId,
 		planName: plan.name,
 		status: 'ACTIVE',
@@ -95,10 +98,10 @@ export function applyPaidOrderToSubscription(order: Order): Order {
 		appliedAt: now.toISOString(),
 	}
 
-	saveSubscription(snapshot)
-	saveSubscriptionEvent({
+	await saveSubscription(snapshot)
+	await saveSubscriptionEvent({
 		eventId: `subscription:${order.orderCode}`,
-		accountId,
+		userId,
 		orderCode: order.orderCode,
 		paymentId: order.paymentId,
 		type: renewalType,
@@ -113,5 +116,17 @@ export function applyPaidOrderToSubscription(order: Order): Order {
 	order.subscription = snapshot
 	order.activationStatus = 'ACTIVATED'
 	order.updatedAt = now.toISOString()
+	await updateUserPlan(order)
 	return saveOrder(order)
+}
+
+async function updateUserPlan(order: Order) {
+	const user = await findUserById(order.userId)
+	if (!user) return
+	const plan = plans[order.planId].name as UserPlan
+	user.plan = plan
+	user.subscriptionExpiresAt = order.subscription?.expiresAt
+		? new Date(order.subscription.expiresAt)
+		: user.subscriptionExpiresAt
+	await saveUser(user)
 }

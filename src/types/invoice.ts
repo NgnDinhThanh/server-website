@@ -1,8 +1,19 @@
 export type InvoiceType = 'individual' | 'business'
+export type InvoiceBuyerMode = 'consumer' | 'individual' | 'business'
+export type InvoiceVisibility = 'seller_internal' | 'customer_visible'
+export type InvoiceAuthorityMode =
+	| 'WITH_TAX_AUTHORITY_CODE'
+	| 'WITHOUT_TAX_AUTHORITY_CODE'
+export type InvoiceDeliveryStatus =
+	| 'NOT_REQUESTED'
+	| 'PENDING'
+	| 'SENT'
+	| 'FAILED'
 
 export type InvoiceStatus =
 	| 'NOT_REQUESTED'
 	| 'REQUESTED'
+	| 'DRAFT'
 	| 'PREVIEW_READY'
 	| 'PUBLISHING'
 	| 'PUBLISHED'
@@ -21,6 +32,11 @@ export type MisaInvoiceTrace = {
 
 export type OrderInvoice = {
 	provider: 'misa'
+	required: true
+	detailsProvided: boolean
+	buyerMode: InvoiceBuyerMode
+	visibility: InvoiceVisibility
+	authorityMode: InvoiceAuthorityMode
 	requested: boolean
 	type: InvoiceType
 	status: InvoiceStatus
@@ -33,8 +49,13 @@ export type OrderInvoice = {
 	buyerPhone: string
 	deliveryEmail: string
 	emailDeliveryRequested: boolean
+	deliveryStatus: InvoiceDeliveryStatus
 	emailSentAt: string | null
 	emailError: string | null
+	accountDeliveryEmail: string
+	accountDeliveryStatus: InvoiceDeliveryStatus
+	accountEmailSentAt: string | null
+	accountEmailError: string | null
 	previewUrl: string | null
 	downloadUrl: string | null
 	invoiceNumber: string | null

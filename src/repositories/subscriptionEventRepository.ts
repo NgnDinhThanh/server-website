@@ -1,35 +1,40 @@
 import type { SubscriptionEvent } from '../types.js'
+import { SubscriptionEventModel } from '../models/SubscriptionEvent.js'
 
-const subscriptionEvents = new Map<string, SubscriptionEvent>()
-const orderCodeToEventId = new Map<string, string>()
-
-export function getSubscriptionEvent(
+export async function getSubscriptionEvent(
 	eventId: string
-): SubscriptionEvent | undefined {
-	return subscriptionEvents.get(eventId)
+): Promise<SubscriptionEvent | undefined> {
+	return ((await SubscriptionEventModel.findOne({ eventId }).lean()) ||
+		undefined) as SubscriptionEvent | undefined
 }
 
-export function getSubscriptionEventByOrderCode(
+export async function getSubscriptionEventByOrderCode(
 	orderCode: number | string
-): SubscriptionEvent | undefined {
-	const eventId = orderCodeToEventId.get(String(orderCode))
-	return eventId ? subscriptionEvents.get(eventId) : undefined
+): Promise<SubscriptionEvent | undefined> {
+	return ((await SubscriptionEventModel.findOne({
+		orderCode: Number(orderCode),
+	}).lean()) || undefined) as SubscriptionEvent | undefined
 }
 
-export function saveSubscriptionEvent(
+export async function saveSubscriptionEvent(
 	event: SubscriptionEvent
-): SubscriptionEvent {
-	subscriptionEvents.set(event.eventId, event)
-	orderCodeToEventId.set(String(event.orderCode), event.eventId)
-	return event
+): Promise<SubscriptionEvent> {
+	const saved = await SubscriptionEventModel.findOneAndUpdate(
+		{ eventId: event.eventId },
+		event,
+		{ new: true, upsert: true, setDefaultsOnInsert: true }
+	).lean()
+	return (saved || event) as SubscriptionEvent
 }
 
-export function hasSubscriptionEventForOrder(
+export async function hasSubscriptionEventForOrder(
 	orderCode: number | string
-): boolean {
-	return orderCodeToEventId.has(String(orderCode))
+): Promise<boolean> {
+	return Boolean(
+		await SubscriptionEventModel.exists({ orderCode: Number(orderCode) })
+	)
 }
 
-export function listSubscriptionEvents(): SubscriptionEvent[] {
-	return Array.from(subscriptionEvents.values())
+export async function listSubscriptionEvents(): Promise<SubscriptionEvent[]> {
+	return (await SubscriptionEventModel.find().lean()) as SubscriptionEvent[]
 }
