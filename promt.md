@@ -9,3 +9,10 @@ Thay đổi, cập nhật giao diện:
 
 - Kiểm tra tất cả các trang đều phải có header giống nhau, với route định hướng chuẩn và đầy đủ, hiện tại BLog, Tutorial đang không đồng nhất
 - Thay đổi cách sắp xếp, theo thứ tự: Book Free Demo -> Download Free -> Acount logo, Download Free màu trắng.
+
+Yêu cầu giao diện mới:
+
+- 1 trang để ghi nhận góp ý khách hàng, thu nhận zalo tên - sdt - mail - góp ý/đề xuất - video/ảnh mô tả tương ứng > lưu vào 1 folder driver nhé
+  Một page có chức năng ghi nhận ý kiến khách hàng, người dùng nhập vào tên, số điện thoại (recommend số có sử dụng zalo), nhập đóng góp, hay đề xuất phát triển cho phần mềm, có thể đính kèm ảnh, rồi video minh họa. Khi gửi đi thì BE xử lý lưu lại vào một forder dựng sẵn trên google driver, có lưu trữ rõ ràng theo từng trường, có thể hiển thị dưới dạng danh sách.
+  Hãy suy nghĩ rồi trình bày ý tưởng, kế hoạch.
+- Trang này được mở bởi một nav link trên header, ngang cấp với pricing, resource, ...

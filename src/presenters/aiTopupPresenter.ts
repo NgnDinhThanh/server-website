@@ -1,0 +1,73 @@
+import { getAiTopupPayment } from '../repositories/aiTopupPaymentRepository.js'
+import type { AiTopupOrder } from '../types.js'
+
+export async function publicAiTopupOrder(order: AiTopupOrder) {
+	const payment = await getAiTopupPayment(order.paymentId)
+
+	if (!payment) {
+		throw new Error(`AI top-up payment record not found for order ${order.orderCode}`)
+	}
+
+	return {
+		orderCode: order.orderCode,
+		userId: order.userId,
+		user: {
+			id: order.userSnapshot.id,
+			name: order.userSnapshot.name,
+			email: order.userSnapshot.email,
+		},
+		payment: {
+			paymentId: payment.paymentId,
+			provider: payment.provider,
+			providerOrderId: payment.providerOrderId,
+			providerCaptureId: payment.providerCaptureId,
+			amount: payment.amount,
+			currency: payment.currency,
+			status: payment.status,
+			checkoutUrl: payment.checkoutUrl,
+			qrCode: payment.qrCode,
+			bank: payment.bank,
+			paidAt: payment.paidAt,
+			amountPaid: payment.amountPaid,
+			amountRemaining: payment.amountRemaining,
+		},
+		amount: order.amount,
+		currency: order.currency,
+		unitPricePerToken: order.unitPricePerToken,
+		tokenAmount: order.tokenAmount,
+		description: order.description,
+		status: order.status,
+		creditStatus: order.creditStatus,
+		createdAt: order.createdAt,
+		updatedAt: order.updatedAt,
+		expiresAt: order.expiresAt,
+		paidAt: order.paidAt,
+		creditedAt: order.creditedAt,
+		paymentReceiptEmailStatus:
+			order.paymentReceiptEmailStatus ?? 'NOT_REQUESTED',
+		paymentReceiptEmailSentAt: order.paymentReceiptEmailSentAt ?? null,
+		paymentReceiptEmailError: order.paymentReceiptEmailError ?? null,
+		reused: order.reused,
+		invoiceRequested: order.invoice.requested,
+		invoiceRequired: order.invoice.required,
+		invoiceDetailsProvided: order.invoice.detailsProvided,
+		invoiceBuyerMode: order.invoice.buyerMode,
+		invoiceVisibility: order.invoice.visibility,
+		invoiceStatus: order.invoice.status,
+		invoiceNumber: order.invoice.invoiceNumber,
+		invoiceIssuedAt: order.invoice.issuedAt,
+		invoiceError: order.invoice.error,
+		invoiceDownloadUrl: order.invoice.downloadUrl,
+		invoiceDeliveryEmail: order.invoice.deliveryEmail,
+		invoiceEmailDeliveryRequested: order.invoice.emailDeliveryRequested,
+		invoiceEmailDeliveryStatus: order.invoice.deliveryStatus,
+		invoiceEmailSentAt: order.invoice.emailSentAt,
+		invoiceEmailError: order.invoice.emailError,
+		invoiceAccountDeliveryEmail: order.invoice.accountDeliveryEmail,
+		invoiceAccountEmailDeliveryStatus: order.invoice.accountDeliveryStatus,
+		invoiceAccountEmailSentAt: order.invoice.accountEmailSentAt,
+		invoiceAccountEmailError: order.invoice.accountEmailError,
+		invoiceMisaRefId: order.invoice.misa.refId,
+		invoiceMisaTransactionId: order.invoice.misa.transactionId,
+	}
+}

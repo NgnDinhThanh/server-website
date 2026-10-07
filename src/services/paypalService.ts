@@ -9,6 +9,9 @@ type PaypalOrderInput = {
 	description: string
 	planName: string
 	months: number
+	itemName?: string
+	itemQuantity?: number
+	itemUnitAmountValue?: string
 }
 
 type PaypalRequestOptions = RequestInit & {
@@ -206,7 +209,12 @@ export async function createPaypalOrder({
 	description,
 	planName,
 	months,
+	itemName,
+	itemQuantity,
+	itemUnitAmountValue,
 }: PaypalOrderInput): Promise<PaypalApiObject> {
+	const quantity = itemQuantity || months
+	const unitAmountValue = itemUnitAmountValue || (Number(amountValue) / months).toFixed(2)
 	return paypalRequest('/v2/checkout/orders', {
 		method: 'POST',
 		body: JSON.stringify({
@@ -229,11 +237,11 @@ export async function createPaypalOrder({
 					},
 					items: [
 						{
-							name: `${planName} subscription`,
-							quantity: String(months),
+							name: itemName || `${planName} subscription`,
+							quantity: String(quantity),
 							unit_amount: {
 								currency_code: currency,
-								value: (Number(amountValue) / months).toFixed(2),
+								value: unitAmountValue,
 							},
 						},
 					],

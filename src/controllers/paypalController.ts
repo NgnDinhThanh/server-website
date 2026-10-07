@@ -7,6 +7,7 @@ import {
 	createPaypalPayment as createPaypalPaymentService,
 	getPaypalSyncedOrder,
 } from '../services/paypalPaymentService.js'
+import { applyAiTopupPaypalWebhookUpdate } from '../services/aiTopupPaymentService.js'
 import {
 	isTransientPaypalRequestError,
 } from '../services/paypalService.js'
@@ -78,10 +79,16 @@ export async function getPaypalPaymentStatus(
 
 export async function handlePaypalWebhook(req: Request, res: Response) {
 	try {
-		await applyPaypalWebhookUpdate({
+		const subscriptionOrder = await applyPaypalWebhookUpdate({
 			req: req as RequestWithRawBody,
 			event: req.body,
 		})
+		if (!subscriptionOrder) {
+			await applyAiTopupPaypalWebhookUpdate({
+				req: req as RequestWithRawBody,
+				event: req.body,
+			})
+		}
 		res.json({ ok: true })
 	} catch (error) {
 		if (isTransientPaypalRequestError(error)) {

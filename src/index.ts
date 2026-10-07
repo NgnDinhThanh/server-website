@@ -42,12 +42,23 @@ import {
 	handleWebhook,
 } from './controllers/payosController.js'
 import {
+	captureAiTopupPaypalPayment,
+	createDomesticAiTopupPayment,
+	createPaypalAiTopupPayment,
+	getAiTopupPaymentStatus,
+	sendAiTopupOrderInvoiceEmail,
+} from './controllers/aiTopupController.js'
+import {
 	capturePaypalPayment,
 	createPaypalPayment,
 	getPaypalConfig,
 	getPaypalPaymentStatus,
 	handlePaypalWebhook,
 } from './controllers/paypalController.js'
+import {
+	getTutorials,
+	syncTutorials,
+} from './controllers/tutorialController.js'
 import { requireAuth } from './middleware/requireAuth.js'
 import { requireAdmin } from './middleware/requireAdmin.js'
 
@@ -96,6 +107,8 @@ app.post('/api/auth/reset-password', resetPassword)
 app.post('/api/auth/change-password', requireAuth, changePassword)
 app.post('/api/auth/logout', requireAuth, logout)
 app.post('/api/book-demo/request', requestBookDemo)
+app.get('/api/tutorials', getTutorials)
+app.post('/api/tutorials/sync', requireAuth, requireAdmin, syncTutorials)
 
 app.get('/api/admin/activation-requests', requireAuth, requireAdmin, listActivationRequests)
 app.post(
@@ -105,7 +118,6 @@ app.post(
 	activateRequest
 )
 
-app.post('/api/payments/payos/create', requireAuth, createDomesticPayment)
 app.post('/api/payments/vnpay/create', requireAuth, createDomesticPayment)
 app.patch('/api/payments/:orderCode/invoice', requireAuth, updatePaymentInvoice)
 app.get('/api/payments/paypal/config', getPaypalConfig)
@@ -113,6 +125,20 @@ app.post('/api/payments/paypal/create', requireAuth, createPaypalPayment)
 app.post('/api/payments/paypal/:paypalOrderId/capture', requireAuth, capturePaypalPayment)
 app.get('/api/payments/paypal/status/:orderCode', requireAuth, getPaypalPaymentStatus)
 app.get('/api/payments/:orderCode', requireAuth, getPaymentStatus)
+
+app.post('/api/ai-topups/payos/create', requireAuth, createDomesticAiTopupPayment)
+app.post('/api/ai-topups/paypal/create', requireAuth, createPaypalAiTopupPayment)
+app.post(
+	'/api/ai-topups/paypal/:paypalOrderId/capture',
+	requireAuth,
+	captureAiTopupPaypalPayment
+)
+app.get('/api/ai-topups/:orderCode', requireAuth, getAiTopupPaymentStatus)
+app.post(
+	'/api/ai-topups/:orderCode/invoice/send-email',
+	requireAuth,
+	sendAiTopupOrderInvoiceEmail
+)
 
 app.get('/api/invoices/misa/templates', getMisaInvoiceTemplates)
 app.get('/api/invoices/:orderCode', requireAuth, getInvoiceStatus)

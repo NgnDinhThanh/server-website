@@ -1,3 +1,5 @@
+import type { PaymentCurrency } from './payment.js'
+
 export type MisaApiResponse<T> = {
 	Data?: T
 	ErrorCode?: string
@@ -58,13 +60,23 @@ export type MisaTaxRateInfo = {
 	VATAmountOC: number
 }
 
+export type MisaOptionUserDefined = {
+	MainCurrency: string
+	AmountDecimalDigits: string
+	AmountOCDecimalDigits: string
+	UnitPriceOCDecimalDigits: string
+	UnitPriceDecimalDigits: string
+	QuantityDecimalDigits?: string
+	ExchangRateDecimalDigits?: string
+}
+
 export type MisaInvoicePayload = {
 	RefID: string
 	InvSeries: string
 	InvTemplateNo: string
 	InvDate: string
-	CurrencyCode: 'VND'
-	ExchangeRate: 1
+	CurrencyCode: PaymentCurrency
+	ExchangeRate: number
 	IsInvoiceSummary: false
 	IsSendEmail: false
 	ReceiverName: string
@@ -83,6 +95,7 @@ export type MisaInvoicePayload = {
 	TotalDiscountAmount: number
 	OriginalInvoiceDetail: MisaInvoiceLineItem[]
 	TaxRateInfo: MisaTaxRateInfo[]
+	OptionUserDefined?: MisaOptionUserDefined
 } & MisaInvoiceBuyer
 
 export type MisaPublishingPayload = {

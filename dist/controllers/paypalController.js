@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { publicOrder } from '../presenters/orderPresenter.js';
 import { applyPaypalWebhookUpdate, capturePaypalPayment as capturePaypalPaymentService, createPaypalPayment as createPaypalPaymentService, getPaypalSyncedOrder, } from '../services/paypalPaymentService.js';
+import { applyAiTopupPaypalWebhookUpdate } from '../services/aiTopupPaymentService.js';
 import { isTransientPaypalRequestError, } from '../services/paypalService.js';
 import { assertOrderOwner, getAuthenticatedUserSnapshot, } from '../utils/authenticatedRequest.js';
 export function getPaypalConfig(req, res) {
@@ -47,10 +48,16 @@ export async function getPaypalPaymentStatus(req, res, next) {
 }
 export async function handlePaypalWebhook(req, res) {
     try {
-        await applyPaypalWebhookUpdate({
+        const subscriptionOrder = await applyPaypalWebhookUpdate({
             req: req,
             event: req.body,
         });
+        if (!subscriptionOrder) {
+            await applyAiTopupPaypalWebhookUpdate({
+                req: req,
+                event: req.body,
+            });
+        }
         res.json({ ok: true });
     }
     catch (error) {

@@ -1,4 +1,14 @@
 export type {
+	AiTokenBalance,
+	AiTokenLedgerEntry,
+	AiTopupCreditStatus,
+	AiTopupOrder,
+	AiTopupOrderStatus,
+	AiTopupPaymentRecord,
+	AiTopupTokenLedgerType,
+	CreateAiTopupPaymentBody,
+} from './types/aiTopup.js'
+export type {
 	ActivationRequestStatus,
 	SubscriptionActivationRequest,
 } from './types/activation.js'
@@ -67,6 +77,11 @@ export type {
 	SubscriptionSnapshot,
 	SubscriptionStatus,
 } from './types/subscription.js'
+export type {
+	TutorialIntroVideo,
+	TutorialResponse,
+	TutorialVideoSnapshot,
+} from './types/tutorial.js'
 export {
 	USER_ROLE,
 	type AuthUserPayload,

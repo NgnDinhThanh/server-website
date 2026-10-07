@@ -125,7 +125,9 @@ export async function paypalRequest(path, init = {}) {
     }, timeoutMs || config.paypal.requestTimeoutMs), retries);
     return parsePaypalResponse(response);
 }
-export async function createPaypalOrder({ orderCode, amountValue, currency, description, planName, months, }) {
+export async function createPaypalOrder({ orderCode, amountValue, currency, description, planName, months, itemName, itemQuantity, itemUnitAmountValue, }) {
+    const quantity = itemQuantity || months;
+    const unitAmountValue = itemUnitAmountValue || (Number(amountValue) / months).toFixed(2);
     return paypalRequest('/v2/checkout/orders', {
         method: 'POST',
         body: JSON.stringify({
@@ -148,11 +150,11 @@ export async function createPaypalOrder({ orderCode, amountValue, currency, desc
                     },
                     items: [
                         {
-                            name: `${planName} subscription`,
-                            quantity: String(months),
+                            name: itemName || `${planName} subscription`,
+                            quantity: String(quantity),
                             unit_amount: {
                                 currency_code: currency,
-                                value: (Number(amountValue) / months).toFixed(2),
+                                value: unitAmountValue,
                             },
                         },
                     ],

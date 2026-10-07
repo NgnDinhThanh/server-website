@@ -1,11 +1,15 @@
 import { config } from '../config.js';
 import { applyWebhookPaymentUpdate } from '../services/paymentService.js';
+import { applyAiTopupPayosWebhookPaymentUpdate } from '../services/aiTopupPaymentService.js';
 import { confirmWebhook, verifyWebhook } from '../services/payosService.js';
 export async function handleWebhook(req, res) {
     try {
         const webhookData = await verifyWebhook(req.body);
         const data = webhookData?.data ?? webhookData;
-        await applyWebhookPaymentUpdate(data);
+        const subscriptionOrder = await applyWebhookPaymentUpdate(data);
+        if (!subscriptionOrder) {
+            await applyAiTopupPayosWebhookPaymentUpdate(data);
+        }
         res.json({ ok: true });
     }
     catch (error) {

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"provider":{"$numberInt":"1"},"eventId":{"$numberInt":"1"}},"name":"uniq_webhook_provider_eventId","unique":true,"sparse":true}],"uuid":"8e406b8b04bc4eb58d9db681b2d05dbe","collectionName":"webhook_events","type":"collection"}

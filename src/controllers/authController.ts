@@ -26,16 +26,36 @@ type AuthedRequest = Request & {
 	}
 }
 
+function maskEmail(value: unknown) {
+	const email = typeof value === 'string' ? value.trim() : ''
+	return email.replace(/(^.).*(@.*$)/, '$1***$2')
+}
+
 export async function register(req: Request, res: Response) {
 	try {
+		const startedAt = Date.now()
+		console.log('[auth.register] start', {
+			email: maskEmail(req.body?.email),
+			at: new Date().toISOString(),
+		})
 		const validation = validateRegisterRequest(req.body || {})
+		console.log('[auth.register] after validate', {
+			ok: validation.ok,
+			ms: Date.now() - startedAt,
+		})
 		if (!validation.ok) {
 			return res.status(validation.status).json(validation.body)
 		}
 
 		const result = await AuthService.register(validation.value)
+		console.log('[auth.register] after service', {
+			success: result.success,
+			msg: result.msg,
+			ms: Date.now() - startedAt,
+		})
 		return res.status(200).json(result)
 	} catch (error) {
+		console.error('[auth.register] error', error)
 		return res.status(200).json({
 			success: false,
 			msg: error instanceof Error ? error.message : 'Registration failed',
@@ -114,14 +134,29 @@ export async function me(req: AuthedRequest, res: Response) {
 
 export async function forgotPassword(req: Request, res: Response) {
 	try {
+		const startedAt = Date.now()
+		console.log('[auth.forgotPassword] start', {
+			email: maskEmail(req.body?.email),
+			at: new Date().toISOString(),
+		})
 		const validation = validateForgotPasswordRequest(req.body || {})
+		console.log('[auth.forgotPassword] after validate', {
+			ok: validation.ok,
+			ms: Date.now() - startedAt,
+		})
 		if (!validation.ok) {
 			return res.status(validation.status).json(validation.body)
 		}
 
 		const result = await AuthService.forgotPassword(validation.value.email)
+		console.log('[auth.forgotPassword] after service', {
+			success: result.success,
+			msg: result.msg,
+			ms: Date.now() - startedAt,
+		})
 		return res.status(200).json(result)
 	} catch (error) {
+		console.error('[auth.forgotPassword] error', error)
 		return res.status(200).json({
 			success: false,
 			msg: error instanceof Error ? error.message : 'Forgot password failed',

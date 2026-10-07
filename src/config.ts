@@ -9,6 +9,13 @@ function readNumberEnv(key: string, fallback: number) {
 	return Number.isFinite(value) ? value : fallback
 }
 
+function readPositiveNumberEnv(key: string, fallback: number) {
+	const raw = readEnv(key)
+	if (!raw) return fallback
+	const value = Number(raw)
+	return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
 function readListEnv(key: string) {
 	return readEnv(key)
 		.split(',')
@@ -63,6 +70,17 @@ export const config = {
 			readNumberEnv('PAYPAL_ORDER_TTL_MINUTES', 15) * 60 * 1000,
 		requestTimeoutMs: readNumberEnv('PAYPAL_REQUEST_TIMEOUT_MS', 30_000),
 		requestRetries: readNumberEnv('PAYPAL_REQUEST_RETRIES', 2),
+	},
+	aiTopup: {
+		minVndAmount: readPositiveNumberEnv('AI_TOPUP_MIN_VND_AMOUNT', 100000),
+		minUsdAmount: readPositiveNumberEnv('AI_TOPUP_MIN_USD_AMOUNT', 5),
+		vndUnitPricePerToken: readPositiveNumberEnv('AI_TOPUP_VND_UNIT_PRICE_PER_TOKEN', 100),
+		usdUnitPricePerToken: readPositiveNumberEnv('AI_TOPUP_USD_UNIT_PRICE_PER_TOKEN', 0.01),
+	},
+	tutorial: {
+		youtubeApiKey: readEnv('YOUTUBE_API_KEY'),
+		playlistId: readEnv('YOUTUBE_TUTORIAL_PLAYLIST_ID'),
+		introVideoId: readEnv('YOUTUBE_TUTORIAL_INTRO_VIDEO_ID'),
 	},
 	misa: {
 		apiBaseUrl: readEnv('MISA_API_BASE_URL'),

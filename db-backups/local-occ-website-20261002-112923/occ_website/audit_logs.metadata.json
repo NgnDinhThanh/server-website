@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"entity":{"$numberInt":"1"},"entityId":{"$numberInt":"1"},"createdAt":{"$numberInt":"-1"}},"name":"idx_audit_entity_createdAt"}],"uuid":"daf83bc3215146318d5bdce791749091","collectionName":"audit_logs","type":"collection"}

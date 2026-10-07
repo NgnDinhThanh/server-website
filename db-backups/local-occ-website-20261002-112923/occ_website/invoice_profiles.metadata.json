@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"accountId":{"$numberInt":"1"}},"name":"idx_invoice_profiles_accountId","sparse":true}],"uuid":"700ba5f2e16443f897fdf387a138e38d","collectionName":"invoice_profiles","type":"collection"}

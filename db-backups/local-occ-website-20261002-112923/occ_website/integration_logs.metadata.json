@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"provider":{"$numberInt":"1"},"operation":{"$numberInt":"1"},"createdAt":{"$numberInt":"-1"}},"name":"idx_integration_provider_operation_createdAt"}],"uuid":"250702eb33fa48c599d747cc9c3b511e","collectionName":"integration_logs","type":"collection"}

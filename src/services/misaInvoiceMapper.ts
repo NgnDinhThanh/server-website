@@ -1,5 +1,10 @@
 import { config } from '../config.js'
 import { createHttpError } from '../utils/httpError.js'
+import {
+	convertMisaAmountToVnd,
+	resolveMisaInvoiceMoney,
+	roundMisaCurrencyAmount,
+} from './misaInvoiceMoney.js'
 import type { MisaInvoicePayload, Order } from '../types.js'
 
 const CONSUMER_BUYER_NAME = 'Bán cho người tiêu dùng'
@@ -26,22 +31,29 @@ function readVatRate() {
 
 function resolveMisaTax(order: Order) {
 	const item = order.items[0]
-	const totalAmount = resolveInvoiceAmountVnd(order)
+	const money = resolveMisaInvoiceMoney({
+		amount: order.amount,
+		currency: order.currency,
+	})
 
 	if (!item || item.taxCategory === 'NON_TAXABLE') {
 		return {
-			totalAmount,
-			amountWithoutVat: totalAmount,
-			vatAmount: 0,
+			...money,
+			amountWithoutVatOriginal: money.originalAmount,
+			amountWithoutVatConverted: money.convertedAmount,
+			vatAmountOriginal: 0,
+			vatAmountConverted: 0,
 			vatRateName: 'KCT',
 		}
 	}
 
 	if (item.taxCategory === 'VAT_ZERO') {
 		return {
-			totalAmount,
-			amountWithoutVat: totalAmount,
-			vatAmount: 0,
+			...money,
+			amountWithoutVatOriginal: money.originalAmount,
+			amountWithoutVatConverted: money.convertedAmount,
+			vatAmountOriginal: 0,
+			vatAmountConverted: 0,
 			vatRateName: '0%',
 		}
 	}
@@ -50,38 +62,64 @@ function resolveMisaTax(order: Order) {
 		typeof item.taxRate === 'number' && Number.isFinite(item.taxRate)
 			? item.taxRate
 			: readVatRate()
-	const amountWithoutVat = roundMoney(totalAmount / (1 + vatRate / 100))
-	const vatAmount = totalAmount - amountWithoutVat
+	const amountWithoutVatOriginal = roundMisaCurrencyAmount(
+		money.originalAmount / (1 + vatRate / 100),
+		order.currency
+	)
+	const vatAmountOriginal = roundMisaCurrencyAmount(
+		money.originalAmount - amountWithoutVatOriginal,
+		order.currency
+	)
+	const amountWithoutVatConverted = convertMisaAmountToVnd(
+		amountWithoutVatOriginal,
+		order.currency
+	)
+	const vatAmountConverted = convertMisaAmountToVnd(
+		vatAmountOriginal,
+		order.currency
+	)
 
 	return {
-		totalAmount,
-		amountWithoutVat,
-		vatAmount,
+		...money,
+		amountWithoutVatOriginal,
+		amountWithoutVatConverted,
+		vatAmountOriginal,
+		vatAmountConverted,
 		vatRateName: `${vatRate}%`,
 	}
 }
 
-function roundMoney(value: number) {
-	return Math.round(value)
-}
-
-function resolveInvoiceAmountVnd(order: Order) {
-	if (order.currency === 'USD') {
-		return Math.round(order.amount * config.usdToVndRate)
+function resolveConsumerBuyerLegalName(order: Order) {
+	const buyerLegalName = order.userSnapshot.name.trim()
+	if (!buyerLegalName) {
+		throw createHttpError(
+			'User account name is required for consumer invoice buyer legal name',
+			409
+		)
 	}
-	return order.amount
+	return buyerLegalName
 }
 
 export function createMisaInvoicePayload(order: Order): MisaInvoicePayload {
 	assertMisaConfig()
 
 	const invoice = order.invoice
-	const { totalAmount, amountWithoutVat, vatAmount, vatRateName } =
-		resolveMisaTax(order)
+	const {
+		currencyCode,
+		exchangeRate,
+		originalAmount,
+		convertedAmount,
+		amountWithoutVatOriginal,
+		amountWithoutVatConverted,
+		vatAmountOriginal,
+		vatAmountConverted,
+		vatRateName,
+		optionUserDefined,
+	} = resolveMisaTax(order)
 	const isConsumerInvoice = invoice.buyerMode === 'consumer'
 	const buyerLegalName =
 		isConsumerInvoice
-			? CONSUMER_BUYER_NAME
+			? resolveConsumerBuyerLegalName(order)
 			: invoice.buyerMode === 'business'
 			? invoice.buyerCompanyName
 			: invoice.buyerName
@@ -101,8 +139,8 @@ export function createMisaInvoicePayload(order: Order): MisaInvoicePayload {
 		InvSeries: config.misa.invoiceSeries,
 		InvTemplateNo: config.misa.invTemplateNo,
 		InvDate: (order.paidAt || new Date().toISOString()).slice(0, 10),
-		CurrencyCode: 'VND',
-		ExchangeRate: 1,
+		CurrencyCode: currencyCode,
+		ExchangeRate: exchangeRate,
 		IsInvoiceSummary: false,
 		IsSendEmail: false,
 		ReceiverName: '',
@@ -115,15 +153,15 @@ export function createMisaInvoicePayload(order: Order): MisaInvoicePayload {
 		BuyerFullName: buyerFullName,
 		BuyerEmail: buyerEmail,
 		BuyerPhoneNumber: buyerPhone,
-		TotalSaleAmountOC: amountWithoutVat,
-		TotalSaleAmount: amountWithoutVat,
-		TotalAmountWithoutVATOC: amountWithoutVat,
-		TotalAmountWithoutVAT: amountWithoutVat,
+		TotalSaleAmountOC: amountWithoutVatOriginal,
+		TotalSaleAmount: amountWithoutVatConverted,
+		TotalAmountWithoutVATOC: amountWithoutVatOriginal,
+		TotalAmountWithoutVAT: amountWithoutVatConverted,
 		DiscountRate: 0,
-		TotalVATAmountOC: vatAmount,
-		TotalVATAmount: vatAmount,
-		TotalAmountOC: totalAmount,
-		TotalAmount: totalAmount,
+		TotalVATAmountOC: vatAmountOriginal,
+		TotalVATAmount: vatAmountConverted,
+		TotalAmountOC: originalAmount,
+		TotalAmount: convertedAmount,
 		TotalDiscountAmountOC: 0,
 		TotalDiscountAmount: 0,
 		OriginalInvoiceDetail: [
@@ -137,25 +175,26 @@ export function createMisaInvoicePayload(order: Order): MisaInvoicePayload {
 				ItemCode: order.planId,
 				UnitName: 'month',
 				Quantity: 1,
-				UnitPrice: amountWithoutVat,
-				AmountOC: amountWithoutVat,
-				Amount: amountWithoutVat,
+				UnitPrice: amountWithoutVatOriginal,
+				AmountOC: amountWithoutVatOriginal,
+				Amount: amountWithoutVatConverted,
 				DiscountRate: 0,
 				DiscountAmountOC: 0,
 				DiscountAmount: 0,
-				AmountWithoutVATOC: amountWithoutVat,
-				AmountWithoutVAT: amountWithoutVat,
+				AmountWithoutVATOC: amountWithoutVatOriginal,
+				AmountWithoutVAT: amountWithoutVatConverted,
 				VATRateName: vatRateName,
-				VATAmountOC: vatAmount,
-				VATAmount: vatAmount,
+				VATAmountOC: vatAmountOriginal,
+				VATAmount: vatAmountConverted,
 			},
 		],
 		TaxRateInfo: [
 			{
 				VATRateName: vatRateName,
-				AmountWithoutVATOC: amountWithoutVat,
-				VATAmountOC: vatAmount,
+				AmountWithoutVATOC: amountWithoutVatOriginal,
+				VATAmountOC: vatAmountOriginal,
 			},
 		],
+		OptionUserDefined: optionUserDefined,
 	}
 }
