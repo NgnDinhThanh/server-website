@@ -22,6 +22,10 @@ import {
 	listActivationRequests,
 } from './controllers/adminController.js'
 import { requestBookDemo } from './controllers/bookDemoController.js'
+import {
+	requestFeedback,
+	uploadFeedbackFiles,
+} from './controllers/feedbackController.js'
 import { getHealth } from './controllers/healthController.js'
 import {
 	createDomesticPayment,
@@ -107,6 +111,7 @@ app.post('/api/auth/reset-password', resetPassword)
 app.post('/api/auth/change-password', requireAuth, changePassword)
 app.post('/api/auth/logout', requireAuth, logout)
 app.post('/api/book-demo/request', requestBookDemo)
+app.post('/api/feedback/request', uploadFeedbackFiles, requestFeedback)
 app.get('/api/tutorials', getTutorials)
 app.post('/api/tutorials/sync', requireAuth, requireAdmin, syncTutorials)
 

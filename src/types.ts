@@ -26,6 +26,14 @@ export type {
 	BookDemoRequestBody,
 	BookDemoResponse,
 } from './types/bookDemo.js'
+export type {
+	FeedbackFile,
+	FeedbackFiles,
+	FeedbackRequest,
+	FeedbackRequestBody,
+	FeedbackResponse,
+	FeedbackStorageResult,
+} from './types/feedback.js'
 export type { HttpError } from './types/http.js'
 export type {
 	InvoiceAuthorityMode,
